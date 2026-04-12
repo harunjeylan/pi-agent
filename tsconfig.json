@@ -11,5 +11,5 @@
     "resolveJsonModule": true,
     "types": ["bun-types"],
   },
-  "include": ["../.pi/src/**/*", "../.pi/extensions/**/*"],
+  "include": ["./src/**/*", "./extensions/**/*"],
 }

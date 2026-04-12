@@ -6,20 +6,6 @@
     "pi-package"
   ],
   "quietStartup": false,
-  "pi": {
-    "extensions": [
-      "./extensions"
-    ],
-    "skills": [
-      "./skills"
-    ],
-    "prompts": [
-      "./prompts"
-    ],
-    "themes": [
-      "./themes"
-    ]
-  },
   "dependencies": {
     "@aidalinfo/office-to-markdown": "^1.0.2",
     "@mariozechner/pi-coding-agent": "^0.66.1",

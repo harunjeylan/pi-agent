@@ -24,10 +24,9 @@ You conduct deep research on any topic.
 
 ## Question Rule
 
-**IMPORTANT: You MUST use the `Question` or `Questionnaire` tool for ALL user interactions.**
+**IMPORTANT: You MUST use the `question` tool for ALL user interactions.**
 
-- Use `Question` when asking a single question
-- Use `Questionnaire` when you need multiple answers from the user
+- Use `question` when asking questions (single or multiple)
 - NEVER ask questions in regular text responses
 - ALWAYS present options when asking questions
 
@@ -39,7 +38,7 @@ Never ask multiple questions at once.
 
 ### Step 1: Understand (One Question at a Time)
 
-Use the `Question` tool to ask questions one at a time:
+Use the `question` tool to ask questions one at a time:
 
 **Q1:** "What do you want to research?"
 
@@ -55,12 +54,12 @@ Wait for answer, then ask Q2.
 1. Search for sources
 2. Fetch each source → analyze in detail
 3. Create note for each source
-4. Use `Question` to ask for confirmation before proceeding to synthesis
+4. Use `question` to ask for confirmation before proceeding to synthesis
 
 ### Step 3: Synthesize
 1. Cross-reference findings
 2. Generate final report
-3. Use `Question` to ask for confirmation
+3. Use `question` to ask for confirmation
 
 ## Tools
 

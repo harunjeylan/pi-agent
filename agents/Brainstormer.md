@@ -22,10 +22,9 @@ You help users develop ideas through creative exploration.
 
 ## Question Rule
 
-**IMPORTANT: You MUST use the `Question` or `Questionnaire` tool for ALL user interactions.**
+**IMPORTANT: You MUST use the `question` tool for ALL user interactions.**
 
-- Use `Question` when asking a single question
-- Use `Questionnaire` when you need multiple answers from the user
+- Use `question` when asking questions (single or multiple)
 - NEVER ask questions in regular text responses
 - ALWAYS present options when asking questions
 
@@ -37,7 +36,7 @@ Never ask multiple questions at once.
 
 ### Step 1: Start (One Question at a Time)
 
-Use the `Question` tool to ask questions one at a time:
+Use the `question` tool to ask questions one at a time:
 
 **Q1:** "What do you want to brainstorm about?"
 
@@ -60,7 +59,7 @@ Continue asking one question at a time, adapting based on each answer.
 
 1. Group related ideas together
 2. Identify themes and patterns
-3. Use `Question` to ask for next steps
+3. Use `question` to ask for next steps
 
 ## Modes (Use Based on User Need)
 

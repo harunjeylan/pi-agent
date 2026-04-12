@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "packages": {
+    "pi-connect": {
+      "name": "pi-connect",
+      "size": 117352,
+      "timestamp": 1775993735175
+    },
+    "pi-caveman": {
+      "name": "pi-caveman",
+      "size": 15525,
+      "timestamp": 1775993735175
+    },
+    "pi-mcp-adapter": {
+      "name": "pi-mcp-adapter",
+      "size": 589927,
+      "timestamp": 1775993735175
+    },
+    "pi-web-access": {
+      "name": "pi-web-access",
+      "size": 6842507,
+      "timestamp": 1775993735177
+    },
+    "pi-docparser": {
+      "name": "pi-docparser",
+      "size": 159863,
+      "timestamp": 1775993735177
+    },
+    "pi-extension-manager": {
+      "name": "pi-extension-manager",
+      "size": 250407,
+      "timestamp": 1775993735672
+    },
+    "pi-manage-todo-list": {
+      "name": "pi-manage-todo-list",
+      "size": 25232,
+      "timestamp": 1775993735675
+    },
+    "pi-schedule-prompt": {
+      "name": "pi-schedule-prompt",
+      "size": 57749,
+      "timestamp": 1775993735688
+    },
+    "pi-collapse-tools": {
+      "name": "pi-collapse-tools",
+      "size": 10203,
+      "timestamp": 1775993735701
+    },
+    "@tintinweb/pi-subagents": {
+      "name": "@tintinweb/pi-subagents",
+      "size": 451231,
+      "timestamp": 1775993736024
+    }
+  }
+}

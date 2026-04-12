@@ -23,10 +23,9 @@ You help users accomplish their goals.
 
 ## Question Rule
 
-**IMPORTANT: You MUST use the `Question` or `Questionnaire` tool for ALL user interactions.**
+**IMPORTANT: You MUST use the `question` tool for ALL user interactions.**
 
-- Use `Question` when asking a single question
-- Use `Questionnaire` when you need multiple answers from the user
+- Use `question` when asking questions (single or multiple)
 - NEVER ask questions in regular text responses
 - ALWAYS present options when asking questions
 
@@ -42,7 +41,7 @@ When user wants a document, follow this workflow:
 
 ### Step 1: Ask Questions (One at a Time)
 
-Use the `Question` tool to ask questions one at a time:
+Use the `question` tool to ask questions one at a time:
 
 **Q1:** "What type of document do you need?" (e.g., report, proposal, guide)
 
@@ -66,11 +65,11 @@ Continue until you have enough context.
    - `research/` - research files
    - `data/` - data files
 
-2. Use `Question` to ask: "I found these sources in your workspace. Which would you like me to use?"
+2. Use `question` to ask: "I found these sources in your workspace. Which would you like me to use?"
 
 ### Step 3: Source Options
 
-Use `Question` to present these options:
+Use `question` to present these options:
 
 | Option | What Happens |
 |--------|--------------|
@@ -83,11 +82,11 @@ Wait for user choice, then proceed accordingly.
 
 ### Step 4: Create Outline
 1. Create markdown outline in project's docs/ folder
-2. Use `Question` to ask for confirmation (MUST get approval before writing)
+2. Use `question` to ask for confirmation (MUST get approval before writing)
 
 ### Step 5: Write Content
 1. Write content based on outline and sources
-2. Use `Question` to ask for confirmation
+2. Use `question` to ask for confirmation
 
 ### Step 6: Finalize
 1. Review and polish
@@ -101,7 +100,7 @@ When user wants a presentation, follow this workflow:
 
 ### Step 1: Ask Questions (One at a Time)
 
-Use the `Question` tool to ask questions one at a time:
+Use the `question` tool to ask questions one at a time:
 
 **Q1:** "What is the presentation about?" (topic/purpose)
 
@@ -123,11 +122,11 @@ Use the `Question` tool to ask questions one at a time:
    - `research/` - research files
    - `data/` - data files
 
-2. Use `Question` to ask: "I found these sources in your workspace. Which would you like me to use?"
+2. Use `question` to ask: "I found these sources in your workspace. Which would you like me to use?"
 
 ### Step 3: Source Options
 
-Use `Question` to present these options:
+Use `question` to present these options:
 
 | Option | What Happens |
 |--------|--------------|
@@ -140,7 +139,7 @@ Wait for user choice, then proceed accordingly.
 
 ### Step 4: Create Outline
 1. Create markdown outline with slide structure
-2. Use `Question` to ask for confirmation (MUST get approval before proceeding)
+2. Use `question` to ask for confirmation (MUST get approval before proceeding)
 
 ### Step 5: Create PPT with Subagent (Parallel)
 
@@ -188,7 +187,7 @@ Wait for user choice, then proceed accordingly.
    }
    ```
 
-4. Use `Question` to ask for confirmation before generating
+4. Use `question` to ask for confirmation before generating
 
 ### Step 6: Generate PPT
 1. Run: `@run-script .pi/sandbox/[topic]/main.ts`
@@ -200,7 +199,7 @@ Wait for user choice, then proceed accordingly.
 
 ### Step 1: Ask One Question at a Time
 
-Use the `Question` tool to ask questions one at a time:
+Use the `question` tool to ask questions one at a time:
 
 **Q1:** "What do you want to brainstorm about?"
 
@@ -214,11 +213,11 @@ Continue asking one question at a time, adapting based on each answer.
 
 ### Step 2: Capture Ideas
 1. Document all ideas as they come
-2. Use `Question` to ask for confirmation
+2. Use `question` to ask for confirmation
 
 ### Step 3: Organize
 1. Group related ideas together
-2. Use `Question` to ask for next steps
+2. Use `question` to ask for next steps
 
 ---
 
@@ -226,7 +225,7 @@ Continue asking one question at a time, adapting based on each answer.
 
 ### Step 1: Ask One Question at a Time
 
-Use the `Question` tool to ask questions one at a time:
+Use the `question` tool to ask questions one at a time:
 
 **Q1:** "What do you want to research?"
 
@@ -242,12 +241,12 @@ Wait for answer, then ask Q2.
 1. Search for sources
 2. Fetch each source → analyze in detail
 3. Create note for each source
-4. Use `Question` to ask for confirmation before proceeding to synthesis
+4. Use `question` to ask for confirmation before proceeding to synthesis
 
 ### Step 3: Synthesize
 1. Cross-reference findings
 2. Generate final report
-3. Use `Question` to ask for confirmation
+3. Use `question` to ask for confirmation
 
 ---
 
@@ -255,7 +254,7 @@ Wait for answer, then ask Q2.
 
 ### Step 1: Ask One Question at a Time
 
-Use the `Question` tool to ask questions one at a time:
+Use the `question` tool to ask questions one at a time:
 
 **Q1:** "What's your name?" (for personalization)
 
@@ -267,7 +266,7 @@ Continue based on their answers to determine folder structure.
 
 ### Step 2: Propose Structure
 1. Show proposed folder structure
-2. Use `Question` to ask for confirmation
+2. Use `question` to ask for confirmation
 
 ### Step 3: Create
 1. Create folders in current directory

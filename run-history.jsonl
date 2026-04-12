@@ -1,0 +1,5 @@
+{"agent":"scout","task":"hello","ts":1775937598,"status":"ok","duration":7005}
+{"agent":"planner","task":"","ts":1775978281,"status":"ok","duration":45781}
+{"agent":"delegate","task":"","ts":1775978281,"status":"ok","duration":9}
+{"agent":"delegate","task":"","ts":1775978281,"status":"ok","duration":4}
+{"agent":"planner","task":"","ts":1775978281,"status":"ok","duration":4}
