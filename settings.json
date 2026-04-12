@@ -1,6 +1,9 @@
 {
+  "lastChangelogVersion": "0.66.1",
   "defaultProvider": "opencode",
   "defaultModel": "big-pickle",
+  "theme": "synthwave",
+  "quietStartup": true,
   "packages": [
     "npm:pi-connect",
     "npm:pi-mcp-adapter",
@@ -12,6 +15,5 @@
     "npm:pi-collapse-tools",
     "npm:pi-schedule-prompt",
     "npm:@tintinweb/pi-subagents"
-  ],
-  "theme": "synthwave"
+  ]
 }
