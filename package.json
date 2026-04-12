@@ -1,0 +1,49 @@
+{
+  "name": "pi-workspace",
+  "type": "module",
+  "description": "Pi Coding Agent extension playground",
+  "keywords": [
+    "pi-package"
+  ],
+  "quietStartup": false,
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ],
+    "skills": [
+      "./skills"
+    ],
+    "prompts": [
+      "./prompts"
+    ],
+    "themes": [
+      "./themes"
+    ]
+  },
+  "dependencies": {
+    "@aidalinfo/office-to-markdown": "^1.0.2",
+    "@mariozechner/pi-coding-agent": "^0.66.1",
+    "pptxgenjs": "^4.0.1",
+    "croner": "^8.0.0",
+    "nanoid": "^5.0.0",
+    "yaml": "^2.8.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0"
+  },
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/harunjeylan/pi-workspace.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/harunjeylan/pi-workspace/issues"
+  },
+  "homepage": "https://github.com/harunjeylan/pi-workspace#readme"
+}
