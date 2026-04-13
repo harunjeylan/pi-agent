@@ -1,6 +1,7 @@
 import { ChildProcess, spawn } from "node:child_process";
 import { getAgentDir, type ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
+import { Type } from "@sinclair/typebox";
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { join } from "path";
 
@@ -55,6 +56,7 @@ export interface SwarmState {
   toolCount: number;
   lastWork: string;
   contextPct: number;
+  _removed?: boolean;
 }
 
 export interface SpawnOptions {
@@ -63,12 +65,17 @@ export interface SpawnOptions {
   sessionKey?: string;
   continueSession?: boolean;
   timeout?: number;
+  onStatusChange?: (status: "running" | "done" | "error") => void;
+  onElapsedUpdate?: (elapsed: number) => void;
+  onLastWorkUpdate?: (work: string) => void;
 }
 
 export interface AgentExecutionResult {
   output: string;
   exitCode: number;
   elapsed: number;
+  toolCount: number;
+  contextPct: number;
 }
 
 export class Agent {
@@ -89,6 +96,8 @@ export class Agent {
 
   private chainSteps: ChainStep[] = [];
   private chainStepStates: ChainStepState[] = [];
+  private chainWidgetText: Text | null = null;
+  private teamWidgetText: Text | null = null;
 
   private swarmAgents = new Map<number, SwarmState>();
   private nextSwarmId = 1;
@@ -106,6 +115,10 @@ export class Agent {
 
   isInitialized(): boolean {
     return this._initialized;
+  }
+
+  getSessionDir(): string {
+    return this._sessionDir;
   }
 
   reloadProfiles(cwd: string): void {
@@ -271,6 +284,12 @@ export class Agent {
     return this.chainStepStates;
   }
 
+  updateChainStepState(index: number, updates: Partial<ChainStepState>): void {
+    if (this.chainStepStates[index]) {
+      this.chainStepStates[index] = { ...this.chainStepStates[index], ...updates };
+    }
+  }
+
   createSwarmAgent(task: string): SwarmState {
     const id = this.nextSwarmId++;
     const sessionFile = join(this._sessionDir, `swarm-${id}.json`);
@@ -280,7 +299,7 @@ export class Agent {
       task,
       output: "",
       elapsed: 0,
-      turnCount: 0,
+      turnCount: 1,
       sessionFile,
       toolCount: 0,
       lastWork: "",
@@ -325,7 +344,7 @@ export class Agent {
       "openrouter/google/gemini-3-flash-preview";
     const tools =
       agentProfile.tools?.join(",") ||
-      "read,bash,grep,find,ls,edit,glob,webfetch";
+      "read,bash,grep,find,ls,edit";
 
     const sessionFile = options.sessionKey
       ? join(this._sessionDir, `${options.sessionKey}.json`)
@@ -355,6 +374,13 @@ export class Agent {
     args.push(options.task);
 
     const startTime = Date.now();
+    const textChunks: string[] = [];
+    let toolCount = 0;
+    let contextPct = 0;
+
+    if (options.onStatusChange) {
+      options.onStatusChange("running");
+    }
 
     return new Promise((resolve) => {
       const proc = spawn("pi", args, {
@@ -365,8 +391,31 @@ export class Agent {
       let output = "";
       let errorOutput = "";
 
+      proc.stdout?.setEncoding("utf-8");
       proc.stdout?.on("data", (data) => {
         output += data.toString();
+        textChunks.push(data.toString());
+
+        if (options.onLastWorkUpdate) {
+          const lines = output.split("\n").filter((l: string) => l.trim());
+          const lastLine = lines[lines.length - 1] || "";
+          try {
+            const event = JSON.parse(lastLine);
+            if (event.type === "message_update" && event.assistantMessageEvent?.type === "text_delta") {
+              const full = textChunks.join("");
+              const lastFullLine = full.split("\n").filter((l: string) => l.trim()).pop() || "";
+              options.onLastWorkUpdate!(lastFullLine);
+            }
+            if (event.type === "tool_execution_start") {
+              toolCount++;
+            }
+            if (event.type === "message_end" && event.message?.usage) {
+              const inputTokens = event.message.usage.input || 0;
+              const maxContext = 128000;
+              contextPct = Math.round((inputTokens / maxContext) * 100);
+            }
+          } catch {}
+        }
       });
 
       proc.stderr?.on("data", (data) => {
@@ -376,28 +425,49 @@ export class Agent {
       const timeout = options.timeout || 300000;
       const timer = setTimeout(() => {
         proc.kill();
+        if (options.onStatusChange) {
+          options.onStatusChange("error");
+        }
         resolve({
           output: "Timeout: Agent exceeded maximum runtime",
           exitCode: 1,
           elapsed: timeout,
+          toolCount,
+          contextPct,
         });
       }, timeout);
 
+      const elapsedTimer = options.onElapsedUpdate ? setInterval(() => {
+        options.onElapsedUpdate!(Date.now() - startTime);
+      }, 1000) : undefined;
+
       proc.on("close", (code) => {
         clearTimeout(timer);
+        if (elapsedTimer) clearInterval(elapsedTimer);
+        if (options.onStatusChange) {
+          options.onStatusChange(code === 0 ? "done" : "error");
+        }
         resolve({
           output: output || errorOutput,
           exitCode: code || 0,
           elapsed: Date.now() - startTime,
+          toolCount,
+          contextPct,
         });
       });
 
       proc.on("error", (err) => {
         clearTimeout(timer);
+        if (elapsedTimer) clearInterval(elapsedTimer);
+        if (options.onStatusChange) {
+          options.onStatusChange("error");
+        }
         resolve({
           output: `Error: ${err.message}`,
           exitCode: 1,
           elapsed: Date.now() - startTime,
+          toolCount,
+          contextPct,
         });
       });
     });
@@ -438,20 +508,42 @@ export class Agent {
       state.status === "running" ? "●" :
       state.status === "done" ? "✓" : "✗";
 
-    const nameStr = theme.fg("accent", truncate(state.name, w));
+    const nameStr = truncate(state.name, w);
+    const nameVisible = nameStr.length;
+
     const statusStr = `${statusIcon} ${state.status}`;
     const timeStr = state.status !== "idle" ? ` ${Math.round(state.elapsed / 1000)}s` : "";
     const statusLine = theme.fg(statusColor, statusStr + timeStr);
+    const statusVisible = statusStr.length + timeStr.length;
+
+    const toolStr = state.toolCount > 0 ? `${state.toolCount}` : "";
+    const ctxStr = state.contextPct > 0 ? `${Math.round(state.contextPct)}%` : "";
+    const statsParts: string[] = [];
+    if (toolStr) statsParts.push(`🛠${toolStr}`);
+    if (ctxStr) statsParts.push(`📊${ctxStr}`);
+    const statsContent = statsParts.join(" ");
+    const statsLine = theme.fg("muted", statsContent);
+    const statsVisible = statsContent.length;
+
+    const workRaw = state.lastWork || "";
+    const workText = truncate(workRaw, Math.min(50, w - 1));
+    const workLine = theme.fg("muted", workText || "—");
+    const workVisible = (workText || "—").length;
 
     const top = "┌" + "─".repeat(w) + "┐";
     const bot = "└" + "─".repeat(w) + "┘";
     const border = (content: string, visLen: number) =>
-      theme.fg("dim", "│") + content + " ".repeat(Math.max(0, w - visLen)) + theme.fg("dim", "│");
+      theme.fg("dim", "│") +
+      content +
+      " ".repeat(Math.max(0, w - visLen)) +
+      theme.fg("dim", "│");
 
     return [
       theme.fg("dim", top),
-      border(" " + nameStr, 1 + state.name.length),
-      border(" " + statusLine, 1 + statusStr.length + timeStr.length),
+      border(" " + theme.fg("accent", truncate(state.name, w)), 1 + nameVisible),
+      border(" " + statusLine, 1 + statusVisible),
+      border(" " + statsLine, 1 + statsVisible),
+      border(" " + workLine, 1 + workVisible),
       theme.fg("dim", bot),
     ];
   }
@@ -468,7 +560,7 @@ export class Agent {
       const cards = rowStates.map(s => this.renderCard(s, colWidth, theme));
 
       while (cards.length < cols) {
-        cards.push(Array(6).fill(" ".repeat(colWidth)));
+        cards.push(Array(5).fill(" ".repeat(colWidth)));
       }
 
       const cardHeight = cards[0].length;
@@ -482,8 +574,11 @@ export class Agent {
 
   registerTeamWidget(ctx: any): void {
     const agent = this;
+    if (!this.teamWidgetText) {
+      this.teamWidgetText = new Text("", 0, 1);
+    }
+    const text = this.teamWidgetText;
     ctx.ui.setWidget("agent-team", (_tui: any, theme: any) => {
-      const text = new Text("", 0, 1);
       return {
         render(width: number): string[] {
           const states = Array.from(agent.teamStates.values());
@@ -503,8 +598,11 @@ export class Agent {
 
   registerChainWidget(ctx: any): void {
     const agent = this;
+    if (!this.chainWidgetText) {
+      this.chainWidgetText = new Text("", 0, 1);
+    }
+    const text = this.chainWidgetText;
     ctx.ui.setWidget("agent-chain", (_tui: any, theme: any) => {
-      const text = new Text("", 0, 1);
       return {
         render(width: number): string[] {
           const states = agent.getChainStepStates();
@@ -613,5 +711,32 @@ export class Agent {
     ctx.ui.setWidget("agent-team", undefined);
     ctx.ui.setWidget("agent-chain", undefined);
     ctx.ui.setWidget("agent-swarm", undefined);
+  }
+
+  registerAvailableAgentsTool(): void {
+    this.pi.registerTool({
+      name: "available_agents",
+      description: "List all available specialist agents",
+      parameters: Type.Object({}),
+      execute: async (_toolCallId, _params, _signal, _onUpdate, _ctx) => {
+        const profiles = this.getProfiles();
+        if (profiles.length === 0) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "No agents available. Create profiles in .pi/agents/",
+              },
+            ],
+          };
+        }
+        const list = profiles
+          .map((p) => `- ${p.name}: ${p.description || "No description"}`)
+          .join("\n");
+        return {
+          content: [{ type: "text", text: `Available agents:\n${list}` }],
+        };
+      },
+    });
   }
 }

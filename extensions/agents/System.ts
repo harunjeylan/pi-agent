@@ -11,6 +11,33 @@ export class SystemManager {
     this.agent = agent;
     this.registerCommands();
     this.registerTools();
+    this.registerListeners();
+  }
+
+  private registerListeners(): void {
+    this.pi.on("before_agent_start", async (_event, ctx) => {
+      if (this.agent.getMode() !== "single") {
+        return {};
+      }
+
+      const profiles = this.agent.getProfiles();
+      const agentList = profiles
+        .map((p) => `- ${p.name}: ${p.description || "No description"}`)
+        .join("\n");
+
+      return {
+        systemPrompt: ctx.systemPrompt + `
+
+## Team Mode
+For complex tasks requiring multiple skills, create a team of specialists:
+- Use available_agents to see available specialist agents
+- Use create_team to create and activate a team
+- Use dispatch_agent to delegate tasks to team members
+
+Available agents:
+${agentList}`,
+      };
+    });
   }
 
   private registerCommands(): void {
@@ -75,7 +102,7 @@ export class SystemManager {
             content: [
               {
                 type: "text",
-                text: `Agent "${params.agent}" not found. Use list_agents to see available agents.`,
+                text: `Agent "${params.agent}" not found. Use available_agents to see available agents.`,
               },
             ],
           };
@@ -83,34 +110,6 @@ export class SystemManager {
         this.agent.setSystemAgent(params.agent);
         return {
           content: [{ type: "text", text: `Switched to ${params.agent}` }],
-        };
-      },
-    });
-
-    this.pi.registerTool({
-      name: "list_agents",
-      description: "List all available agent profiles",
-      parameters: Type.Object({}),
-      execute: async (_toolCallId, _params, _signal, _onUpdate, _ctx) => {
-        const profiles = this.agent.getProfiles();
-        const validProfiles = profiles.filter(
-          (p) => p && typeof p.name === "string",
-        );
-        if (validProfiles.length === 0) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: "No agents available. Create profiles in .pi/agents/",
-              },
-            ],
-          };
-        }
-        const list = validProfiles
-          .map((p) => `- ${p.name}: ${p.description || "No description"}`)
-          .join("\n");
-        return {
-          content: [{ type: "text", text: `Available agents:\n${list}` }],
         };
       },
     });

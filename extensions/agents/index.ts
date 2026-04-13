@@ -9,15 +9,21 @@ import { ChainManager } from "./Chain";
 export default function Agents(pi: ExtensionAPI): void {
   const agent = new Agent(pi);
 
-  new SystemManager(pi, agent);
-  new SwarmManager(pi, agent);
-  new TeamManager(pi, agent);
-  new ChainManager(pi, agent);
+  agent.registerAvailableAgentsTool();
+
+  const systemManager = new SystemManager(pi, agent);
+  const swarmManager = new SwarmManager(pi, agent);
+  const teamManager = new TeamManager(pi, agent);
+  const chainManager = new ChainManager(pi, agent);
 
   pi.on("session_start", async (_event, ctx) => {
     agent.initialize(ctx.cwd);
 
     agent.clearWidgets(ctx);
+
+    for (let i = 1; i < 100; i++) {
+      ctx.ui.setWidget(`swarm-${i}`, undefined);
+    }
 
     const mode = agent.getMode();
     if (mode === "team") {
