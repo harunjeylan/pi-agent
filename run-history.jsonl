@@ -3,3 +3,5 @@
 {"agent":"delegate","task":"","ts":1775978281,"status":"ok","duration":9}
 {"agent":"delegate","task":"","ts":1775978281,"status":"ok","duration":4}
 {"agent":"planner","task":"","ts":1775978281,"status":"ok","duration":4}
+{"agent":"researcher","task":"","ts":1776004629,"status":"ok","duration":43642}
+{"agent":"planner","task":"","ts":1776004629,"status":"ok","duration":12}
