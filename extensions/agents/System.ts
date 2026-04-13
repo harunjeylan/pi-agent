@@ -26,7 +26,7 @@ export class SystemManager {
         .join("\n");
 
       return {
-        systemPrompt: ctx.systemPrompt + `
+        systemPrompt: `
 
 ## Team Mode
 For complex tasks requiring multiple skills, create a team of specialists:
@@ -91,6 +91,7 @@ ${agentList}`,
   private registerTools(): void {
     this.pi.registerTool({
       name: "switch_system",
+      label: "Switch System",
       description: "Switch the system agent to a different profile",
       parameters: Type.Object({
         agent: Type.String({ description: "Agent name to switch to" }),
@@ -105,11 +106,13 @@ ${agentList}`,
                 text: `Agent "${params.agent}" not found. Use available_agents to see available agents.`,
               },
             ],
+            details: undefined,
           };
         }
         this.agent.setSystemAgent(params.agent);
         return {
           content: [{ type: "text", text: `Switched to ${params.agent}` }],
+          details: undefined,
         };
       },
     });

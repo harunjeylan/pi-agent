@@ -478,7 +478,7 @@ Use the dispatch_agent tool with:
             let promptMode = false;
             let promptTarget = "";
             const promptInput = new Input();
-            promptInput.value = items[cursor].prompt;
+            promptInput.setValue(items[cursor].prompt);
 
             const selectedItems = () => items.filter((i) => i.selected);
 
@@ -556,9 +556,9 @@ Use the dispatch_agent tool with:
               if (promptMode) {
                 if (data === "escape" || matchesKey(data, Key.escape)) {
                   promptMode = false;
-                  promptInput.value = items[cursor].prompt;
+                  promptInput.setValue(items[cursor].prompt);
                 } else if (data === "enter" || matchesKey(data, Key.enter)) {
-                  items[cursor].prompt = promptInput.value || "$INPUT";
+                  items[cursor].prompt = promptInput.getValue() || "$INPUT";
                   promptMode = false;
                 } else {
                   promptInput.handleInput(data);
@@ -578,8 +578,7 @@ Use the dispatch_agent tool with:
                 if (items[cursor].selected) {
                   promptMode = true;
                   promptTarget = items[cursor].name;
-                  promptInput.value = items[cursor].prompt;
-                  promptInput.cursor = promptInput.value.length;
+                  promptInput.setValue(items[cursor].prompt);
                 }
               }
               if (data === "a" || data === "A") {
@@ -591,13 +590,13 @@ Use the dispatch_agent tool with:
               if (data === "enter" || matchesKey(data, Key.enter)) {
                 const selected = selectedItems();
                 if (selected.length === 0) {
-                  done(null);
+                  done(void 0 as unknown as TeamResult);
                 } else {
                   done({ members: selected });
                 }
               }
               if (data === "escape" || matchesKey(data, Key.escape)) {
-                done(null);
+                done(void 0 as unknown as TeamResult);
               }
               refresh();
             };
@@ -631,7 +630,7 @@ Use the dispatch_agent tool with:
             `/team        Modify team\n` +
             `/team-grid   Set columns\n` +
             `/team-clear  Return to single mode`,
-            "success",
+            "info",
           );
         }
       },
@@ -707,7 +706,7 @@ Use the dispatch_agent tool with:
 
         if (options.isPartial || details.status === "dispatching") {
           return new Text(
-            theme.fg("accent", `● ${details.agent || "?"}`) +
+            theme.fg("accent", `● ${details.agentName || "?"}`) +
               theme.fg("dim", " working..."),
             0,
             0,
@@ -721,7 +720,7 @@ Use the dispatch_agent tool with:
             ? Math.round(details.elapsed / 1000)
             : 0;
         const header =
-          theme.fg(color, `${icon} ${details.agent}`) +
+          theme.fg(color, `${icon} ${details.agentName}`) +
           theme.fg("dim", ` ${elapsed}s`);
 
         if (options.expanded && details.fullOutput) {
@@ -740,6 +739,7 @@ Use the dispatch_agent tool with:
   private registerTeamTools(): void {
     this.pi.registerTool({
       name: "create_team",
+      label: "Create Team",
       description: "Create and activate a team of specialist agents for complex tasks",
       parameters: Type.Object({
         agents: Type.Array(Type.String(), {
@@ -775,6 +775,7 @@ Use the dispatch_agent tool with:
                 text: "No valid agents specified. Use available_agents to see available agents.",
               },
             ],
+            details: undefined,
           };
         }
 
@@ -789,7 +790,7 @@ Use the dispatch_agent tool with:
         this.pi.setActiveTools(["dispatch_agent", "clear_team"]);
         this.agent.registerTeamWidget(ctx);
         ctx.ui.setStatus("agent-team", `Team (${members.length})`);
-        ctx.ui.notify(`Team created: ${members.join(", ")}`, "success");
+        ctx.ui.notify(`Team created: ${members.join(", ")}`, "info");
 
         return {
           content: [
@@ -798,12 +799,14 @@ Use the dispatch_agent tool with:
               text: `Team created with ${members.length} agents: ${members.join(", ")}\nUse dispatch_agent to delegate tasks to team members.`,
             },
           ],
+          details: undefined,
         };
       },
     });
 
     this.pi.registerTool({
       name: "clear_team",
+      label: "Clear Team",
       description: "Clear the current team and return to single agent mode",
       parameters: Type.Object({}),
       execute: async (_toolCallId, _params, _signal, _onUpdate, ctx) => {
@@ -814,6 +817,7 @@ Use the dispatch_agent tool with:
             content: [
               { type: "text", text: "No team to clear. Already in single mode." },
             ],
+            details: undefined,
           };
         }
 
@@ -832,6 +836,7 @@ Use the dispatch_agent tool with:
               text: `Team cleared. ${count} agents removed. Returned to single agent mode.`,
             },
           ],
+          details: undefined,
         };
       },
     });

@@ -716,6 +716,7 @@ export class Agent {
   registerAvailableAgentsTool(): void {
     this.pi.registerTool({
       name: "available_agents",
+      label: "Available Agents",
       description: "List all available specialist agents",
       parameters: Type.Object({}),
       execute: async (_toolCallId, _params, _signal, _onUpdate, _ctx) => {
@@ -728,6 +729,7 @@ export class Agent {
                 text: "No agents available. Create profiles in .pi/agents/",
               },
             ],
+            details: undefined,
           };
         }
         const list = profiles
@@ -735,6 +737,7 @@ export class Agent {
           .join("\n");
         return {
           content: [{ type: "text", text: `Available agents:\n${list}` }],
+          details: undefined,
         };
       },
     });

@@ -19,6 +19,7 @@ interface ChainStepState {
   agent: string;
   status: "pending" | "running" | "done" | "error";
   elapsed: number;
+  output: string;
   lastWork: string;
   toolCount: number;
   contextPct: number;
@@ -460,8 +461,8 @@ ${agentCatalog}
           let cursor = 0;
           let promptMode = false;
           let promptTarget = "";
-          const promptInput = new Input();
-          promptInput.value = "$INPUT";
+            const promptInput = new Input();
+            promptInput.setValue("$INPUT");
 
           const buildSteps = (): ChainStep[] => {
             const steps: ChainStep[] = [];
@@ -542,13 +543,13 @@ ${agentCatalog}
             if (promptMode) {
               if (data === "escape" || matchesKey(data, Key.escape)) {
                 promptMode = false;
-                promptInput.value = "$INPUT";
+                promptInput.setValue("$INPUT");
               } else if (data === "enter" || matchesKey(data, Key.enter)) {
                 const step = currentChain.find(s => s.agent === promptTarget);
                 if (step) {
-                  step.prompt = promptInput.value || "$INPUT";
+                  step.prompt = promptInput.getValue() || "$INPUT";
                 } else {
-                  currentChain.push({ agent: promptTarget, prompt: promptInput.value || "$INPUT" });
+                  currentChain.push({ agent: promptTarget, prompt: promptInput.getValue() || "$INPUT" });
                 }
                 promptMode = false;
               } else {
@@ -568,8 +569,7 @@ ${agentCatalog}
                 promptMode = true;
                 promptTarget = items[cursor].name;
                 const existingStep = currentChain.find(s => s.agent === items[cursor].name);
-                promptInput.value = existingStep?.prompt || "$INPUT";
-                promptInput.cursor = promptInput.value.length;
+                promptInput.setValue(existingStep?.prompt || "$INPUT");
               }
             }
             if (data === "a" || data === "A") {
@@ -581,13 +581,13 @@ ${agentCatalog}
             if (data === "enter" || matchesKey(data, Key.enter)) {
               const steps = buildSteps();
               if (steps.length === 0) {
-                done(null);
+                done(void 0 as unknown as ChainResult);
               } else {
                 done({ steps });
               }
             }
             if (data === "escape" || matchesKey(data, Key.escape)) {
-              done(null);
+              done(void 0 as unknown as ChainResult);
             }
             refresh();
           };
@@ -615,6 +615,7 @@ ${agentCatalog}
   private registerTools(): void {
     this.pi.registerTool({
       name: "run_chain",
+      label: "Run Chain",
       description: "Execute the chain pipeline. Each step runs sequentially - output feeds into next.",
       parameters: Type.Object({
         task: Type.String({ description: "Initial task for the first agent" }),
@@ -622,7 +623,7 @@ ${agentCatalog}
       execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
         const steps = this.agent.getChainSteps();
         if (steps.length === 0) {
-          return { content: [{ type: "text", text: "No chain configured. Use /chain to build one." }] };
+          return { content: [{ type: "text", text: "No chain configured. Use /chain to build one." }], details: undefined };
         }
 
         this.widgetCtx = ctx;
@@ -631,6 +632,7 @@ ${agentCatalog}
           agent: s.agent,
           status: "pending" as const,
           elapsed: 0,
+          output: "",
           lastWork: "",
           toolCount: 0,
           contextPct: 0,
@@ -720,6 +722,7 @@ ${agentCatalog}
   private registerChainTools(): void {
     this.pi.registerTool({
       name: "create_chain",
+      label: "Create Chain",
       description: "Create a chain of agents for sequential workflow",
       parameters: Type.Object({
         agents: Type.Array(Type.String(), {
@@ -750,6 +753,7 @@ ${agentCatalog}
             content: [
               { type: "text", text: "No valid agents specified. Use available_agents to see available agents." },
             ],
+            details: undefined,
           };
         }
 
@@ -771,12 +775,14 @@ ${agentCatalog}
               text: `Chain created with ${steps.length} steps: ${flow}\nUse run_chain to execute the pipeline.`,
             },
           ],
+          details: undefined,
         };
       },
     });
 
     this.pi.registerTool({
       name: "clear_chain",
+      label: "Clear Chain",
       description: "Clear the current chain and return to single agent mode",
       parameters: Type.Object({}),
       execute: async (_toolCallId, _params, _signal, _onUpdate, ctx) => {
@@ -785,6 +791,7 @@ ${agentCatalog}
         if (steps.length === 0) {
           return {
             content: [{ type: "text", text: "No chain to clear. Already in single mode." }],
+            details: undefined,
           };
         }
 
@@ -798,6 +805,7 @@ ${agentCatalog}
           content: [
             { type: "text", text: `Chain cleared. ${count} steps removed. Returned to single agent mode.` },
           ],
+          details: undefined,
         };
       },
     });

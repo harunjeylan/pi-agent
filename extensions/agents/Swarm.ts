@@ -152,6 +152,7 @@ export class SwarmManager {
   private registerTools(): void {
     this.pi.registerTool({
       name: "swarm_create",
+      label: "Swarm Create",
       description: "Spawn a background swarm agent",
       parameters: Type.Object({
         task: Type.String({ description: "Task to assign to the swarm agent" }),
@@ -160,12 +161,13 @@ export class SwarmManager {
         this.widgetCtx = ctx;
         const swarmAgent = this.agent.createSwarmAgent(params.task);
         this.runSwarmAgent(swarmAgent.id, params.task, ctx);
-        return { content: [{ type: "text", text: `Spawned swarm agent ${swarmAgent.id}` }] };
+        return { content: [{ type: "text", text: `Spawned swarm agent ${swarmAgent.id}` }], details: undefined };
       },
     });
 
     this.pi.registerTool({
       name: "swarm_continue",
+      label: "Swarm Continue",
       description: "Continue a swarm agent conversation",
       parameters: Type.Object({
         id: Type.Number({ description: "Swarm agent ID" }),
@@ -174,18 +176,19 @@ export class SwarmManager {
       execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
         const swarmAgent = this.agent.getSwarmAgent(params.id);
         if (!swarmAgent) {
-          return { content: [{ type: "text", text: `Swarm agent ${params.id} not found` }] };
+          return { content: [{ type: "text", text: `Swarm agent ${params.id} not found` }], details: undefined };
         }
         if (swarmAgent.status === "running") {
-          return { content: [{ type: "text", text: `Swarm agent ${params.id} is still running` }] };
+          return { content: [{ type: "text", text: `Swarm agent ${params.id} is still running` }], details: undefined };
         }
         this.runSwarmAgent(params.id, params.prompt, ctx, true);
-        return { content: [{ type: "text", text: `Continued swarm agent ${params.id}` }] };
+        return { content: [{ type: "text", text: `Continued swarm agent ${params.id}` }], details: undefined };
       },
     });
 
     this.pi.registerTool({
       name: "swarm_remove",
+      label: "Swarm Remove",
       description: "Remove a swarm agent",
       parameters: Type.Object({
         id: Type.Number({ description: "Swarm agent ID to remove" }),
@@ -193,7 +196,7 @@ export class SwarmManager {
       execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
         const swarmAgent = this.agent.getSwarmAgent(params.id);
         if (!swarmAgent) {
-          return { content: [{ type: "text", text: `Swarm agent ${params.id} not found` }] };
+          return { content: [{ type: "text", text: `Swarm agent ${params.id} not found` }], details: undefined };
         }
         swarmAgent._removed = true;
         if (swarmAgent.proc && swarmAgent.status === "running") {
@@ -201,23 +204,24 @@ export class SwarmManager {
         }
         this.agent.removeSwarmAgent(params.id);
         ctx.ui.setWidget(`swarm-${params.id}`, undefined);
-        return { content: [{ type: "text", text: `Removed swarm agent ${params.id}` }] };
+        return { content: [{ type: "text", text: `Removed swarm agent ${params.id}` }], details: undefined };
       },
     });
 
     this.pi.registerTool({
       name: "swarm_list",
+      label: "Swarm List",
       description: "List all swarm agents",
       parameters: Type.Object({}),
       execute: async (_toolCallId, _params, _signal, _onUpdate, _ctx) => {
         const swarmAgents = this.agent.getSwarmAgents();
         if (swarmAgents.size === 0) {
-          return { content: [{ type: "text", text: "No active swarm agents" }] };
+          return { content: [{ type: "text", text: "No active swarm agents" }], details: undefined };
         }
         const list = Array.from(swarmAgents.values())
           .map(a => `[${a.id}] ${a.status}: ${a.task.slice(0, 40)}`)
           .join("\n");
-        return { content: [{ type: "text", text: `Swarm agents:\n${list}` }] };
+        return { content: [{ type: "text", text: `Swarm agents:\n${list}` }], details: undefined };
       },
     });
   }
