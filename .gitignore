@@ -7,3 +7,4 @@ sessions/
 bin/
 .env
 auth.json
+web-search.json

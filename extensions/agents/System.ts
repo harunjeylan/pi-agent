@@ -11,6 +11,7 @@ export class SystemManager {
     this.agent = agent;
     this.registerCommands();
     this.registerTools();
+    this.registerShortcut();
     this.registerListeners();
   }
 
@@ -84,6 +85,25 @@ ${agentList}`,
           this.agent.setSystemAgent(choice);
           ctx.ui.notify(`Profile: ${choice}`, "info");
         }
+      },
+    });
+  }
+
+  private registerShortcut(): void {
+    this.pi.registerShortcut("Alt+a", {
+      description: "Switch to next system agent (cyclic)",
+      handler: async (ctx) => {
+        const profiles = this.agent.getProfiles().filter(p => p && typeof p.name === "string");
+        if (profiles.length === 0) {
+          ctx.ui.notify("No system profiles available", "warning");
+          return;
+        }
+        const current = this.agent.getSystemAgent()?.name;
+        const currentIndex = profiles.findIndex(p => p.name === current);
+        const nextIndex = (currentIndex + 1) % profiles.length;
+        const nextProfile = profiles[nextIndex];
+        this.agent.setSystemAgent(nextProfile.name);
+        ctx.ui.notify(`System: ${nextProfile.name}`, "info");
       },
     });
   }
