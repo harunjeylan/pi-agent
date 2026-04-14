@@ -30,9 +30,9 @@ export class SystemManager {
 
 ## Team Mode
 For complex tasks requiring multiple skills, create a team of specialists:
-- Use available_agents to see available specialist agents
-- Use create_team to create and activate a team
-- Use dispatch_agent to delegate tasks to team members
+- Use agent_list to see available specialist agents
+- Use team_build to create and activate a team
+- Use team_work to delegate tasks to team members
 
 Available agents:
 ${agentList}`,
@@ -103,7 +103,7 @@ ${agentList}`,
             content: [
               {
                 type: "text",
-                text: `Agent "${params.agent}" not found. Use available_agents to see available agents.`,
+                text: `Agent "${params.agent}" not found. Use agent_list to see available agents.`,
               },
             ],
             details: undefined,

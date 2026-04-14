@@ -23,6 +23,7 @@ interface ChainStepState {
   lastWork: string;
   toolCount: number;
   contextPct: number;
+  task: string;
 }
 
 export class ChainManager {
@@ -106,18 +107,36 @@ export class ChainManager {
       : "openrouter/google/gemini-3-flash-preview";
 
     const tools = profile.tools?.join(",") || "read,bash,grep,find,ls,edit";
-    const sessionFile = join(this.agent.getSessionDir(), `chain-${agentName.toLowerCase()}.json`);
+    const sessionFile = join(
+      this.agent.getSessionDir(),
+      `chain-${agentName.toLowerCase()}.json`,
+    );
     const hasSession = existsSync(sessionFile);
 
+    const totalSteps = this.stepStates.length;
+    const rolePrompt = this.generateChainRolePrompt(
+      agentName,
+      stepIndex,
+      totalSteps,
+    );
+
     const args = [
-      "--mode", "json",
+      "--mode",
+      "json",
       "-p",
       "--no-extensions",
-      "--model", model,
-      "--tools", tools,
-      "--thinking", "off",
-      "--append-system-prompt", profile.body,
-      "--session", sessionFile,
+      "--model",
+      model,
+      "--tools",
+      tools,
+      "--thinking",
+      "off",
+      "--append-system-prompt",
+      profile.body,
+      "--append-system-prompt",
+      rolePrompt,
+      "--session",
+      sessionFile,
     ];
 
     if (hasSession) {
@@ -163,7 +182,11 @@ export class ChainManager {
               if (delta?.type === "text_delta") {
                 textChunks.push(delta.delta || "");
                 const full = textChunks.join("");
-                const last = full.split("\n").filter((l: string) => l.trim()).pop() || "";
+                const last =
+                  full
+                    .split("\n")
+                    .filter((l: string) => l.trim())
+                    .pop() || "";
                 const state = this.stepStates[stepIndex];
                 if (state) {
                   state.lastWork = last.slice(0, this.MAX_LAST_WORK_LENGTH);
@@ -213,7 +236,11 @@ export class ChainManager {
         const exitCode = code ?? 1;
 
         const full = textChunks.join("");
-        const lastWork = full.split("\n").filter((l: string) => l.trim()).pop() || "";
+        const lastWork =
+          full
+            .split("\n")
+            .filter((l: string) => l.trim())
+            .pop() || "";
 
         const state = this.stepStates[stepIndex];
         if (state) {
@@ -257,30 +284,44 @@ export class ChainManager {
     });
   }
 
-  private renderCard(state: ChainStepState, colWidth: number, theme: any): string[] {
+  private renderCard(
+    state: ChainStepState,
+    colWidth: number,
+    theme: any,
+  ): string[] {
     const w = colWidth - 2;
     const truncate = (s: string, max: number) =>
       s.length > max ? s.slice(0, max - 3) + "..." : s;
 
     const statusColor =
-      state.status === "pending" ? "dim" :
-      state.status === "running" ? "accent" :
-      state.status === "done" ? "success" : "error";
+      state.status === "pending"
+        ? "dim"
+        : state.status === "running"
+          ? "accent"
+          : state.status === "done"
+            ? "success"
+            : "error";
     const statusIcon =
-      state.status === "pending" ? "○" :
-      state.status === "running" ? "●" :
-      state.status === "done" ? "✓" : "✗";
+      state.status === "pending"
+        ? "○"
+        : state.status === "running"
+          ? "●"
+          : state.status === "done"
+            ? "✓"
+            : "✗";
 
     const nameStr = truncate(state.agent, w);
     const nameVisible = nameStr.length;
 
     const statusStr = `${statusIcon} ${state.status}`;
-    const timeStr = state.status !== "pending" ? ` ${Math.round(state.elapsed / 1000)}s` : "";
+    const timeStr =
+      state.status !== "pending" ? ` ${Math.round(state.elapsed / 1000)}s` : "";
     const statusLine = theme.fg(statusColor, statusStr + timeStr);
     const statusVisible = statusStr.length + timeStr.length;
 
     const toolStr = state.toolCount > 0 ? `${state.toolCount}` : "";
-    const ctxStr = state.contextPct > 0 ? `${Math.round(state.contextPct)}%` : "";
+    const ctxStr =
+      state.contextPct > 0 ? `${Math.round(state.contextPct)}%` : "";
     const statsParts: string[] = [];
     if (toolStr) statsParts.push(`🛠${toolStr}`);
     if (ctxStr) statsParts.push(`📊${ctxStr}`);
@@ -303,7 +344,10 @@ export class ChainManager {
 
     return [
       theme.fg("dim", top),
-      border(" " + theme.fg("accent", truncate(state.agent, w)), 1 + nameVisible),
+      border(
+        " " + theme.fg("accent", truncate(state.agent, w)),
+        1 + nameVisible,
+      ),
       border(" " + statusLine, 1 + statusVisible),
       border(" " + statsLine, 1 + statsVisible),
       border(" " + workLine, 1 + workVisible),
@@ -350,24 +394,24 @@ Each step runs in order — output from one step feeds into the next.
 ${agentCatalog}
 
 ## Available Tools
-- create_chain: Create a new chain of agents
-- run_chain: Execute the chain pipeline
-- clear_chain: Clear the chain and return to single mode
+- chain_build: Build a new chain of agents
+- chain_execute: Execute the chain pipeline
+- chain_clear: Clear the chain and return to single mode
 
 ## Placeholders
 - $INPUT: Replaced with output from previous step
 - $ORIGINAL: Replaced with the original user task
 
 ## How to Use
-- Use run_chain to execute the chain pipeline
+- Use chain_execute to execute the chain pipeline
 - Each step receives the previous step's output as $INPUT
 - Steps run sequentially, waiting for each to complete before next
 
 ## Guidelines
-- Use run_chain for multi-step workflows
+- Use chain_execute for multi-step workflows
 - Review results after chain completes
-- Use create_chain to programmatically create chains
-- Use clear_chain when chain is no longer needed`,
+- Use chain_build to programmatically create chains
+- Use chain_clear when chain is no longer needed`,
       };
     });
   }
@@ -396,7 +440,9 @@ ${agentCatalog}
           return;
         }
 
-        const validProfiles = profiles.filter(p => p && typeof p.name === "string");
+        const validProfiles = profiles.filter(
+          (p) => p && typeof p.name === "string",
+        );
 
         if (args?.trim()) {
           const sub = args.trim().toLowerCase();
@@ -406,7 +452,7 @@ ${agentCatalog}
               ctx.ui.notify("No chain. Use /chain to build one.", "info");
               return;
             }
-            const chainStr = steps.map(s => s.agent).join(" -> ");
+            const chainStr = steps.map((s) => s.agent).join(" -> ");
             ctx.ui.notify(`Chain: ${chainStr}`, "info");
             return;
           }
@@ -419,24 +465,52 @@ ${agentCatalog}
             return;
           }
           if (sub.startsWith("add ")) {
-            const name = sub.slice(4).trim();
-            const profile = validProfiles.find(p => p.name.toLowerCase() === name.toLowerCase());
+            const parts = sub.slice(4).trim().split(/\s+/);
+            const name = parts[0];
+            const promptArg = parts.slice(1).join(" ");
+
+            const profile = validProfiles.find(
+              (p) => p.name.toLowerCase() === name.toLowerCase(),
+            );
             if (!profile) {
               ctx.ui.notify(`Profile "${name}" not found.`, "warning");
               return;
             }
+
+            let prompt = promptArg || "$INPUT";
+            if (!prompt.includes("$INPUT")) {
+              ctx.ui.notify(
+                `Prompt must include $INPUT placeholder.\nExample: /chain add ${name} "Process: $INPUT"`,
+                "warning",
+              );
+              return;
+            }
+            if (!prompt.includes("$ORIGINAL")) {
+              ctx.ui.notify(
+                `Prompt must include $ORIGINAL placeholder.\nExample: /chain add ${name} "Task: $ORIGINAL"`,
+                "warning",
+              );
+              return;
+            }
+
             const steps = this.agent.getChainSteps();
-            steps.push({ agent: profile.name, prompt: "$INPUT" });
+            steps.push({ agent: profile.name, prompt });
             this.agent.setChainSteps(steps);
             this.agent.setMode("chain");
-            ctx.ui.notify(`Added ${profile.name} to chain.`, "info");
+            ctx.ui.notify(
+              `Added ${profile.name} to chain with prompt: "${prompt}"`,
+              "info",
+            );
             return;
           }
           if (sub.startsWith("remove ")) {
             const idx = parseInt(sub.slice(7).trim()) - 1;
             const steps = this.agent.getChainSteps();
             if (isNaN(idx) || idx < 0 || idx >= steps.length) {
-              ctx.ui.notify(`Invalid index. Use /chain list to see steps.`, "warning");
+              ctx.ui.notify(
+                `Invalid index. Use /chain list to see steps.`,
+                "warning",
+              );
               return;
             }
             const removed = steps.splice(idx, 1)[0];
@@ -450,162 +524,220 @@ ${agentCatalog}
         }
 
         const currentChain = this.agent.getChainSteps();
-        const items: ChainItem[] = validProfiles.map(p => ({
+        const items: ChainItem[] = validProfiles.map((p) => ({
           name: p.name,
-          selected: currentChain.some(s => s.agent === p.name),
+          selected: currentChain.some((s) => s.agent === p.name),
         }));
 
         let cachedLines: string[] | undefined;
 
-        const result = await ctx.ui.custom<ChainResult>((tui, theme, _kb, done) => {
-          let cursor = 0;
-          let promptMode = false;
-          let promptTarget = "";
+        const result = await ctx.ui.custom<ChainResult>(
+          (tui, theme, _kb, done) => {
+            let cursor = 0;
+            let promptMode = false;
+            let promptTarget = "";
             const promptInput = new Input();
-            promptInput.setValue("$INPUT");
+            promptInput.setValue("Task: $ORIGINAL | Input: $INPUT");
 
-          const buildSteps = (): ChainStep[] => {
-            const steps: ChainStep[] = [];
-            for (const item of items) {
-              if (item.selected) {
-                const existingStep = currentChain.find(s => s.agent === item.name);
-                steps.push({ 
-                  agent: item.name, 
-                  prompt: existingStep?.prompt || "$INPUT" 
-                });
+            const buildSteps = (): ChainStep[] => {
+              const steps: ChainStep[] = [];
+              for (const item of items) {
+                if (item.selected) {
+                  const existingStep = currentChain.find(
+                    (s) => s.agent === item.name,
+                  );
+                  steps.push({
+                    agent: item.name,
+                    prompt:
+                      existingStep?.prompt || "Task: $ORIGINAL | Input: $INPUT",
+                  });
+                }
               }
-            }
-            return steps;
-          };
+              return steps;
+            };
 
-          const refresh = () => {
-            cachedLines = undefined;
-            tui.requestRender();
-          };
+            const refresh = () => {
+              cachedLines = undefined;
+              tui.requestRender();
+            };
 
-          const render = (width: number): string[] => {
-            if (cachedLines) return cachedLines;
+            const render = (width: number): string[] => {
+              if (cachedLines) return cachedLines;
 
-            const steps = buildSteps();
-            const lines: string[] = [];
-            lines.push(theme.fg("dim", "─".repeat(width)));
-            lines.push(theme.fg("accent", " Interactive Chain Builder "));
-            lines.push("");
-
-            for (let i = 0; i < items.length; i++) {
-              const item = items[i];
-              const check = item.selected ? "[x]" : "[ ]";
-              const prefix = i === cursor ? theme.fg("accent", ">") : " ";
-              const checkColor = item.selected ? "success" : "dim";
-              const name = i === cursor ? theme.fg("text", item.name) : item.name;
-              lines.push(`${prefix} ${theme.fg(checkColor, check)}: ${name}`);
-            }
-
-            lines.push("");
-            lines.push(theme.fg("dim", "─".repeat(width)));
-            lines.push(theme.fg("dim", "Current Chain:"));
-            if (steps.length === 0) {
-              lines.push(theme.fg("dim", " (empty)"));
-            } else {
-              const chainDisplay = steps.map((s, i) => {
-                return i === 0 ? theme.fg("accent", s.agent) : theme.fg("dim", "->") + theme.fg("accent", s.agent);
-              }).join(" ");
-              lines.push(chainDisplay);
-            }
-            lines.push("");
-            lines.push(theme.fg("dim", "[Space] Toggle  [P] Set Prompt  [A] Select All  [C] Clear All  [Enter] Confirm  [Esc] Cancel"));
-            lines.push(theme.fg("dim", "─".repeat(width)));
-
-            if (promptMode) {
+              const steps = buildSteps();
+              const lines: string[] = [];
+              lines.push(theme.fg("dim", "─".repeat(width)));
+              lines.push(theme.fg("accent", " Interactive Chain Builder "));
               lines.push("");
-              const name = promptTarget;
+
+              for (let i = 0; i < items.length; i++) {
+                const item = items[i];
+                const check = item.selected ? "[x]" : "[ ]";
+                const prefix = i === cursor ? theme.fg("accent", ">") : " ";
+                const checkColor = item.selected ? "success" : "dim";
+                const name =
+                  i === cursor ? theme.fg("text", item.name) : item.name;
+                lines.push(`${prefix} ${theme.fg(checkColor, check)}: ${name}`);
+              }
+
+              lines.push("");
+              lines.push(theme.fg("dim", "─".repeat(width)));
+              lines.push(theme.fg("dim", "Current Chain:"));
+              if (steps.length === 0) {
+                lines.push(theme.fg("dim", " (empty)"));
+              } else {
+                const chainDisplay = steps
+                  .map((s, i) => {
+                    return i === 0
+                      ? theme.fg("accent", s.agent)
+                      : theme.fg("dim", "->") + theme.fg("accent", s.agent);
+                  })
+                  .join(" ");
+                lines.push(chainDisplay);
+              }
+              lines.push("");
               lines.push(
                 theme.fg(
-                  "accent",
-                  `──[${name}]${"─".repeat(Math.max(0, width - name.length - 5))}`,
+                  "dim",
+                  "[Space] Toggle  [P] Set Prompt  [A] Select All  [C] Clear All  [Enter] Confirm  [Esc] Cancel",
                 ),
               );
-              for (const line of promptInput.render(
-                Math.min(36, width - 2),
-              )) {
-                lines.push(theme.fg("accent", " ") + line);
+              lines.push(theme.fg("dim", "─".repeat(width)));
+
+              if (promptMode) {
+                lines.push("");
+                const name = promptTarget;
+                lines.push(
+                  theme.fg(
+                    "accent",
+                    `──[${name}]${"─".repeat(Math.max(0, width - name.length - 5))}`,
+                  ),
+                );
+                for (const line of promptInput.render(
+                  Math.min(36, width - 2),
+                )) {
+                  lines.push(theme.fg("accent", " ") + line);
+                }
+                lines.push("");
+                lines.push(theme.fg("accent", "─".repeat(width)));
+                lines.push(theme.fg("accent", "[Enter] Confirm  [Esc] Cancel"));
               }
               lines.push("");
-              lines.push(theme.fg("accent", "─".repeat(width)));
-              lines.push(theme.fg("accent", "[Enter] Confirm  [Esc] Cancel"));
-            }
-            lines.push("");
-            cachedLines = lines;
-            return lines;
-          };
+              cachedLines = lines;
+              return lines;
+            };
 
-          const handleInput = (data: string) => {
-            if (promptMode) {
-              if (data === "escape" || matchesKey(data, Key.escape)) {
-                promptMode = false;
-                promptInput.setValue("$INPUT");
-              } else if (data === "enter" || matchesKey(data, Key.enter)) {
-                const step = currentChain.find(s => s.agent === promptTarget);
-                if (step) {
-                  step.prompt = promptInput.getValue() || "$INPUT";
+            const handleInput = (data: string) => {
+              if (promptMode) {
+                if (data === "escape" || matchesKey(data, Key.escape)) {
+                  promptMode = false;
+                  promptInput.setValue("Task: $ORIGINAL | Input: $INPUT");
+                } else if (data === "enter" || matchesKey(data, Key.enter)) {
+                  const prompt = promptInput.getValue() || "";
+                  if (!prompt.includes("$INPUT")) {
+                    ctx.ui.notify(
+                      `Prompt must include $INPUT placeholder.\nExample: "Process: $INPUT"`,
+                      "warning",
+                    );
+                    refresh();
+                    return;
+                  }
+                  if (!prompt.includes("$ORIGINAL")) {
+                    ctx.ui.notify(
+                      `Prompt must include $ORIGINAL placeholder.\nExample: "Task: $ORIGINAL"`,
+                      "warning",
+                    );
+                    refresh();
+                    return;
+                  }
+                  const step = currentChain.find(
+                    (s) => s.agent === promptTarget,
+                  );
+                  if (step) {
+                    step.prompt = prompt;
+                  } else {
+                    currentChain.push({ agent: promptTarget, prompt });
+                  }
+                  promptMode = false;
                 } else {
-                  currentChain.push({ agent: promptTarget, prompt: promptInput.getValue() || "$INPUT" });
+                  promptInput.handleInput(data);
                 }
-                promptMode = false;
-              } else {
-                promptInput.handleInput(data);
+                refresh();
+                return;
+              }
+
+              if (data === "up" || matchesKey(data, Key.up))
+                cursor = Math.max(0, cursor - 1);
+              if (data === "down" || matchesKey(data, Key.down))
+                cursor = Math.min(items.length - 1, cursor + 1);
+              if (data === " " || matchesKey(data, Key.space)) {
+                items[cursor].selected = !items[cursor].selected;
+              }
+              if (data === "p" || data === "P") {
+                if (items[cursor].selected) {
+                  promptMode = true;
+                  promptTarget = items[cursor].name;
+                  const existingStep = currentChain.find(
+                    (s) => s.agent === items[cursor].name,
+                  );
+                  promptInput.setValue(
+                    existingStep?.prompt || "Task: $ORIGINAL | Input: $INPUT",
+                  );
+                }
+              }
+              if (data === "a" || data === "A") {
+                for (const item of items) item.selected = true;
+              }
+              if (data === "c" || data === "C") {
+                for (const item of items) item.selected = false;
+              }
+              if (data === "enter" || matchesKey(data, Key.enter)) {
+                const steps = buildSteps();
+                if (steps.length === 0) {
+                  done(void 0 as unknown as ChainResult);
+                } else {
+                  for (const step of steps) {
+                    if (!step.prompt.includes("$INPUT")) {
+                      ctx.ui.notify(
+                        `Step "${step.agent}" prompt must include $INPUT.\nUse [P] to set a valid prompt.`,
+                        "warning",
+                      );
+                      refresh();
+                      return;
+                    }
+                    if (!step.prompt.includes("$ORIGINAL")) {
+                      ctx.ui.notify(
+                        `Step "${step.agent}" prompt must include $ORIGINAL.\nUse [P] to set a valid prompt.`,
+                        "warning",
+                      );
+                      refresh();
+                      return;
+                    }
+                  }
+                  done({ steps });
+                }
+              }
+              if (data === "escape" || matchesKey(data, Key.escape)) {
+                done(void 0 as unknown as ChainResult);
               }
               refresh();
-              return;
-            }
+            };
 
-            if (data === "up" || matchesKey(data, Key.up)) cursor = Math.max(0, cursor - 1);
-            if (data === "down" || matchesKey(data, Key.down)) cursor = Math.min(items.length - 1, cursor + 1);
-            if (data === " " || matchesKey(data, Key.space)) {
-              items[cursor].selected = !items[cursor].selected;
-            }
-            if (data === "p" || data === "P") {
-              if (items[cursor].selected) {
-                promptMode = true;
-                promptTarget = items[cursor].name;
-                const existingStep = currentChain.find(s => s.agent === items[cursor].name);
-                promptInput.setValue(existingStep?.prompt || "$INPUT");
-              }
-            }
-            if (data === "a" || data === "A") {
-              for (const item of items) item.selected = true;
-            }
-            if (data === "c" || data === "C") {
-              for (const item of items) item.selected = false;
-            }
-            if (data === "enter" || matchesKey(data, Key.enter)) {
-              const steps = buildSteps();
-              if (steps.length === 0) {
-                done(void 0 as unknown as ChainResult);
-              } else {
-                done({ steps });
-              }
-            }
-            if (data === "escape" || matchesKey(data, Key.escape)) {
-              done(void 0 as unknown as ChainResult);
-            }
-            refresh();
-          };
-
-          return {
-            render,
-            invalidate: () => {
-              cachedLines = undefined;
-            },
-            handleInput,
-          };
-        });
+            return {
+              render,
+              invalidate: () => {
+                cachedLines = undefined;
+              },
+              handleInput,
+            };
+          },
+        );
 
         if (result?.steps && result.steps.length > 0) {
           this.agent.setChainSteps(result.steps);
           this.agent.setMode("chain");
           this.agent.registerChainWidget(ctx);
-          const chainStr = result.steps.map(s => s.agent).join(" -> ");
+          const chainStr = result.steps.map((s) => s.agent).join(" -> ");
           ctx.ui.notify(`Chain: ${chainStr}`, "info");
         }
       },
@@ -628,7 +760,15 @@ ${agentCatalog}
       execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
         const steps = this.agent.getChainSteps();
         if (steps.length === 0) {
-          return { content: [{ type: "text", text: "No chain configured. Use /chain to build one." }], details: undefined };
+          return {
+            content: [
+              {
+                type: "text",
+                text: "No chain configured. Use /chain to build one.",
+              },
+            ],
+            details: undefined,
+          };
         }
 
         this.widgetCtx = ctx;
@@ -641,6 +781,7 @@ ${agentCatalog}
           lastWork: "",
           toolCount: 0,
           contextPct: 0,
+          task: "",
         }));
         this.syncStepStates();
         this.updateWidget();
@@ -648,6 +789,7 @@ ${agentCatalog}
         const originalTask = params.task;
         let previousOutput = params.task;
         const results: string[] = [];
+        const chainStartTime = Date.now();
 
         for (let i = 0; i < steps.length; i++) {
           const stepIndex = i;
@@ -656,27 +798,61 @@ ${agentCatalog}
             .replace(/\$INPUT/g, previousOutput)
             .replace(/\$ORIGINAL/g, originalTask);
 
-          const result = await this.dispatchChainAgent(step.agent, task, stepIndex, ctx);
+          this.stepStates[stepIndex].task = task;
+          const result = await this.dispatchChainAgent(
+            step.agent,
+            task,
+            stepIndex,
+            ctx,
+          );
 
           if (result.exitCode !== 0) {
-            const retry = await this.dispatchChainAgent(step.agent, task, stepIndex, ctx);
+            const retry = await this.dispatchChainAgent(
+              step.agent,
+              task,
+              stepIndex,
+              ctx,
+            );
             if (retry.exitCode !== 0) {
               this.stepStates[stepIndex].status = "error";
+              this.stepStates[stepIndex].output = retry.output;
+              this.stepStates[stepIndex].task = task;
               this.updateWidget();
+              const stepOutputs = this.stepStates.map((s, i) => ({
+                step: i + 1,
+                agent: s.agent,
+                task: s.task || "(no task)",
+                output: s.output || "(no output)",
+              }));
               return {
-                content: [{ type: "text", text: `Error at step ${stepIndex + 1} (${step.agent}): ${retry.output}` }],
-                details: { status: "error", step: stepIndex + 1, agent: step.agent }
+                content: [
+                  {
+                    type: "text",
+                    text: `Error at step ${stepIndex + 1} (${step.agent}): ${retry.output}`,
+                  },
+                ],
+                details: {
+                  status: "error",
+                  step: stepIndex + 1,
+                  agent: step.agent,
+                  stepOutputs,
+                  elapsed: Date.now() - chainStartTime,
+                },
               };
             }
             this.stepStates[stepIndex].status = "done";
-            this.stepStates[stepIndex].lastWork = retry.output.split("\n").pop() || "";
+            this.stepStates[stepIndex].output = retry.output;
+            this.stepStates[stepIndex].lastWork =
+              retry.output.split("\n").pop() || "";
             this.stepStates[stepIndex].toolCount = retry.toolCount || 0;
             this.stepStates[stepIndex].contextPct = retry.contextPct || 0;
             this.updateWidget();
             previousOutput = retry.output;
           } else {
             this.stepStates[stepIndex].status = "done";
-            this.stepStates[stepIndex].lastWork = result.output.split("\n").pop() || "";
+            this.stepStates[stepIndex].output = result.output;
+            this.stepStates[stepIndex].lastWork =
+              result.output.split("\n").pop() || "";
             this.stepStates[stepIndex].toolCount = result.toolCount || 0;
             this.stepStates[stepIndex].contextPct = result.contextPct || 0;
             this.updateWidget();
@@ -686,9 +862,27 @@ ${agentCatalog}
           results.push(`[${step.agent}] ${result.output.slice(0, 200)}...`);
         }
 
+        const stepOutputs = this.stepStates.map((s, i) => ({
+          step: i + 1,
+          agent: s.agent,
+          task: s.task || "(no task)",
+          output: s.output || "(no output)",
+        }));
+
         return {
-          content: [{ type: "text", text: `Chain complete:\n${results.join("\n")}\n\nFinal output:\n${previousOutput}` }],
-          details: { status: "done", steps: steps.length, output: previousOutput }
+          content: [
+            {
+              type: "text",
+              text: `Chain complete:\n${results.join("\n")}\n\nFinal output:\n${previousOutput}`,
+            },
+          ],
+          details: {
+            status: "done",
+            steps: steps.length,
+            output: previousOutput,
+            stepOutputs,
+            elapsed: Date.now() - chainStartTime,
+          },
         };
       },
 
@@ -699,28 +893,89 @@ ${agentCatalog}
           theme.fg("toolTitle", theme.bold("chain_execute ")) +
             theme.fg("dim", "— ") +
             theme.fg("muted", preview),
-          0, 0,
+          0,
+          0,
         );
       },
 
       renderResult(result, options, theme) {
         const details = result.details as any;
         if (details?.status === "done") {
-          const summary = theme.fg("success", "✓ ") + theme.fg("accent", "Chain") +
-            theme.fg("dim", ` (${details.steps} steps)`);
-          if (options.expanded && details.output) {
-            return new Text(summary + "\n" + details.output, 0, 0);
+          const elapsed = details.elapsed
+            ? Math.round(details.elapsed / 1000)
+            : 0;
+          const sep = theme.fg("dim", "─".repeat(50));
+          const header =
+            theme.fg("accent", sep) +
+            "\n" +
+            theme.fg("success", "✓ ") +
+            theme.fg("accent", "Chain") +
+            theme.fg("dim", ` (${details.steps} steps) in ${elapsed}s`);
+
+          if (options.expanded && details.stepOutputs) {
+            const stepLines: string[] = [];
+            for (const step of details.stepOutputs) {
+              const stepHeader = theme.fg(
+                "accent",
+                `Step ${step.step}: ${step.agent}`,
+              );
+              const taskPreview =
+                step.task.length > 80
+                  ? step.task.slice(0, 77) + "..."
+                  : step.task;
+              const output =
+                step.output.length > 3000
+                  ? step.output.slice(0, 3000) + "\n... [truncated]"
+                  : step.output;
+
+              stepLines.push(
+                stepHeader +
+                  "\n" +
+                  theme.fg("text", `Task: ${taskPreview}`) +
+                  "\n" +
+                  theme.fg("text", `Result: ${output}`) +
+                  "\n",
+              );
+            }
+
+            return new Text(header + "\n\n" + stepLines.join("\n") + sep, 0, 0);
           }
-          return new Text(summary, 0, 0);
+
+          let stepList = "";
+          if (details.stepOutputs) {
+            const stepLines = details.stepOutputs.map((s: any, i: number) => {
+              const icon = "✓";
+              const preview = s.output
+                ? s.output.slice(0, 50) + (s.output.length > 50 ? "..." : "")
+                : "(no output)";
+              return `${i + 1}. ${theme.fg("success", icon)} ${s.agent}: ${preview}`;
+            });
+            stepList = "\n" + stepLines.join("\n");
+          }
+
+          return new Text(
+            theme.fg("success", "✓ ") +
+              theme.fg("accent", "Chain") +
+              theme.fg("dim", ` (${details.steps} steps) in ${elapsed}s`) +
+              stepList,
+            0,
+            0,
+          );
         }
         if (details?.status === "error") {
           return new Text(
-            theme.fg("error", "✗ ") + theme.fg("accent", `Step ${details.step} (${details.agent})`),
-            0, 0,
+            theme.fg("error", "✗ ") +
+              theme.fg("accent", `Step ${details.step} (${details.agent})`),
+            0,
+            0,
           );
         }
         const text = result.content[0];
-        return new Text(text?.type === "text" ? text.text.slice(0, 100) : "", 0, 0);
+        return new Text(
+          text?.type === "text" ? text.text.slice(0, 100) : "",
+          0,
+          0,
+        );
       },
     });
   }
@@ -732,21 +987,32 @@ ${agentCatalog}
       description:
         "Build a sequential pipeline of agents.\n\n" +
         "Usage:\n" +
-        "1. Call with list of agent names in order (first to last)\n" +
-        "2. Editor opens to set prompt for each step\n" +
-        "3. Use $INPUT to get output from previous step\n" +
-        "4. Use chain_execute to run the pipeline\n\n" +
-        "Example: chain_build [\"Researcher\", \"Summarizer\", \"Reviewer\"]",
+        "1. Call with agents and prompts array\n" +
+        "2. Each prompt MUST include both $INPUT and $ORIGINAL placeholders\n" +
+        '3. If prompts not provided, defaults to "$INPUT" for each step\n\n' +
+        'Example: chain_build ["Researcher", "Summarizer"] ["Research: $ORIGINAL", "Summarize: $INPUT"]\n\n' +
+        "Placeholders:\n" +
+        "- $INPUT: Replaced with output from previous step\n" +
+        "- $ORIGINAL: Replaced with the original user task",
       parameters: Type.Object({
         agents: Type.Array(Type.String(), {
           description: "Agent names in order (first to last)",
         }),
+        prompts: Type.Optional(
+          Type.Array(Type.String(), {
+            description:
+              "Prompt for each agent (uses $INPUT and $ORIGINAL placeholders)",
+          }),
+        ),
       }),
       execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
         const profiles = this.agent.getProfiles();
-        const validProfiles = profiles.filter((p) => p && typeof p.name === "string");
+        const validProfiles = profiles.filter(
+          (p) => p && typeof p.name === "string",
+        );
 
         const agentNames = params.agents as string[];
+        const prompts = (params.prompts as string[] | undefined) || [];
 
         const valid: string[] = [];
         for (const name of agentNames) {
@@ -764,15 +1030,44 @@ ${agentCatalog}
         if (valid.length === 0) {
           return {
             content: [
-              { type: "text", text: "No valid agents specified. Use agent_list to see available agents." },
+              {
+                type: "text",
+                text: "No valid agents specified. Use agent_list to see available agents.",
+              },
             ],
             details: undefined,
           };
         }
 
-        const steps: ChainStep[] = valid.map((name) => ({
+        for (let i = 0; i < prompts.length; i++) {
+          const prompt = prompts[i];
+          if (!prompt.includes("$INPUT")) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Invalid prompt for "${valid[i]}": must include $INPUT placeholder.\n\nExample: "Process: $INPUT"`,
+                },
+              ],
+              details: undefined,
+            };
+          }
+          if (!prompt.includes("$ORIGINAL")) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Invalid prompt for "${valid[i]}": must include $ORIGINAL placeholder.\n\nExample: "Task: $ORIGINAL"`,
+                },
+              ],
+              details: undefined,
+            };
+          }
+        }
+
+        const steps: ChainStep[] = valid.map((name, i) => ({
           agent: name,
-          prompt: "$INPUT",
+          prompt: prompts[i] || "$INPUT",
         }));
 
         this.agent.setChainSteps(steps);
@@ -781,11 +1076,14 @@ ${agentCatalog}
         ctx.ui.setStatus("agent-chain", `Chain (${steps.length} steps)`);
 
         const flow = valid.join(" → ");
+        const promptInfo = steps
+          .map((s, i) => `  ${i + 1}. ${s.agent}: "${s.prompt}"`)
+          .join("\n");
         return {
           content: [
             {
               type: "text",
-              text: `Chain created with ${steps.length} steps: ${flow}\nUse chain_execute to run the pipeline.`,
+              text: `Chain created with ${steps.length} steps: ${flow}\n\nPrompts:\n${promptInfo}\n\nUse chain_execute to run the pipeline.`,
             },
           ],
           details: undefined,
@@ -803,7 +1101,12 @@ ${agentCatalog}
 
         if (steps.length === 0) {
           return {
-            content: [{ type: "text", text: "No chain to clear. Already in single mode." }],
+            content: [
+              {
+                type: "text",
+                text: "No chain to clear. Already in single mode.",
+              },
+            ],
             details: undefined,
           };
         }
@@ -816,11 +1119,107 @@ ${agentCatalog}
 
         return {
           content: [
-            { type: "text", text: `Chain cleared. ${count} steps removed. Returned to single agent mode.` },
+            {
+              type: "text",
+              text: `Chain cleared. ${count} steps removed. Returned to single agent mode.`,
+            },
           ],
           details: undefined,
         };
       },
     });
+  }
+
+  private generateChainRolePrompt(
+    agentName: string,
+    stepIndex: number,
+    totalSteps: number,
+  ): string {
+    const stepNum = stepIndex + 1;
+    const isFirst = stepIndex === 0;
+    const isLast = stepIndex === totalSteps - 1;
+    const positionNote = isFirst
+      ? " (first step)"
+      : isLast
+        ? " (final step)"
+        : "";
+
+    const inputNote = isFirst
+      ? "may be empty for first step"
+      : "the output to process";
+
+    const firstStepTask = [
+      "- This is the first step - you receive the original user task directly",
+      "- Understand the overall goal from the user's request",
+      "- Begin processing according to your role",
+    ].join("\n");
+
+    const middleStepTask = [
+      "- Process the input from the previous step",
+      "- Build upon or transform the previous output as appropriate",
+      "- Prepare output for the next step",
+    ].join("\n");
+
+    const taskSection = isFirst ? firstStepTask : middleStepTask;
+
+    const finalStepNote = isLast ? "" : " (or be the final result)";
+
+    const lastStepOutput = [
+      "- This is the final step - your output goes directly to the user",
+      "- Provide a complete, well-structured response",
+      "- Summarize or finalize as appropriate for the task",
+    ].join("\n");
+
+    const middleStepOutput = [
+      "- Format output clearly for the next agent to consume",
+      "- Include necessary context but keep it focused",
+      "- Don't repeat information the next step doesn't need",
+    ].join("\n");
+
+    const outputSection = isLast ? lastStepOutput : middleStepOutput;
+    const outputTitle = isLast ? "Guidelines" : "for Next Step";
+
+    const chainFlow = Array.from({ length: totalSteps }, (_, i) => {
+      const marker = i === stepIndex ? ">>>" : "---";
+      const label =
+        i === 0 ? "Input" : i === totalSteps - 1 ? "Output" : "Process";
+      return marker + " Step " + (i + 1) + ": " + label;
+    }).join("\n");
+
+    return [
+      "## Your Role in the Chain",
+      "",
+      "You are step " +
+        stepNum +
+        " of " +
+        totalSteps +
+        " in a sequential processing pipeline.",
+      "",
+      "## Your Identity",
+      "- Agent: " + agentName,
+      "- Position: Step " + stepNum + " of " + totalSteps + positionNote,
+      "- Your profile defines your role and capabilities",
+      "",
+      "## Input Sources",
+      "The prompt you receive contains two types of content:",
+      "- $ORIGINAL: The original user task (available via placeholder replacement)",
+      "- $INPUT: Output from the previous step (" + inputNote + ")",
+      "",
+      "## Your Task",
+      taskSection,
+      "",
+      "## Working Guidelines",
+      "1. **Understand your input**: Review what the previous step produced",
+      "2. **Apply your expertise**: Perform your designated role's task",
+      "3. **Build the pipeline**: Your output will be used by the next step" +
+        finalStepNote,
+      "4. **Be clear and structured**: Output should be directly usable by the next agent",
+      "",
+      "## Output " + outputTitle,
+      outputSection,
+      "",
+      "## Chain Flow",
+      chainFlow,
+    ].join("\n");
   }
 }

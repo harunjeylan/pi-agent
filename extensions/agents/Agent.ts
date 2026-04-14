@@ -27,11 +27,13 @@ export interface TeamState {
   toolCount: number;
   lastWork: string;
   contextPct: number;
+  rolePrompt?: string;
 }
 
 export interface ChainStep {
   agent: string;
   prompt: string;
+  rolePrompt?: string;
 }
 
 export interface ChainStepState {
@@ -115,6 +117,7 @@ export class Agent {
 
   constructor(pi: ExtensionAPI) {
     this.pi = pi;
+    this.registerToolsTools();
   }
 
   initialize(cwd: string): void {
@@ -504,7 +507,8 @@ export class Agent {
     const profile = profiles.find(
       (p) =>
         p.name.toLowerCase() === agentName.toLowerCase() ||
-        p.name.toLowerCase().replace(/\s+/g, "-") === agentName.toLowerCase().replace(/\s+/g, "-"),
+        p.name.toLowerCase().replace(/\s+/g, "-") ===
+          agentName.toLowerCase().replace(/\s+/g, "-"),
     );
 
     if (!profile) {
@@ -520,7 +524,10 @@ export class Agent {
       : "openrouter/google/gemini-3-flash-preview";
 
     const tools = profile.tools?.join(",") || "read,bash,grep,find,ls,edit";
-    const sessionFile = join(this._sessionDir, `delegate-${agentName.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}.json`);
+    const sessionFile = join(
+      this._sessionDir,
+      `delegate-${agentName.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}.json`,
+    );
 
     const args = [
       "--mode",
@@ -619,8 +626,42 @@ export class Agent {
   }
 
   getSystemPrompt(basePrompt: string): { systemPrompt: string } {
+    const toolsDiscoverySection = `## Tool Discovery
+
+When you need to find the right tool for a task, use these tools:
+
+1. **tools_list** - List all available tools
+   - Use with filter to narrow down by name: \`tools_list({ filter: "agent" })\`
+   - Use with scope to filter by source: \`tools_list({ scope: "user" })\`
+   - Use with active to see enabled tools: \`tools_list({ active: true })\`
+
+2. **tools_search** - Search tools with relevance ranking
+   - Best for finding tools when you know the concept: \`tools_search({ query: "delegate" })\`
+   - Filter by category: \`tools_search({ query: "agent", category: "team_" })\`
+   - Returns scored results sorted by match quality
+
+3. **tools_info** - Get detailed information about a specific tool
+   - Use after finding a tool name: \`tools_info({ name: "agent_delegate" })\`
+   - Include schema: \`tools_info({ name: "agent_delegate", includeSchema: true })\`
+
+## Finding Tools for Tasks
+
+When unsure which tool to use:
+1. First, use \`tools_search\` with a relevant query
+2. Review the results and scores
+3. Use \`tools_info\` on promising candidates
+4. Check parameters with \`tools_info(..., { includeSchema: true })\`
+
+Example workflow to find a delegation tool:
+\`\`\`
+1. tools_search({ query: "delegate" })
+2. tools_info({ name: "agent_delegate", includeSchema: true })
+\`\`\`
+
+`;
+
     if (!this.systemAgent) {
-      return { systemPrompt: basePrompt };
+      return { systemPrompt: basePrompt + "\n\n" + toolsDiscoverySection };
     }
 
     const descriptionLine = this.systemAgent.description
@@ -629,7 +670,7 @@ export class Agent {
 
     return {
       systemPrompt:
-        `${basePrompt}\n\n## Active Session Agent Profile\n\n` +
+        `${basePrompt}\n\n${toolsDiscoverySection}\n\n## Active Session Agent Profile\n\n` +
         `The following profile is active for this session. ` +
         `Follow it unless it conflicts with higher-priority runtime, safety, or tool instructions.\n\n` +
         `Profile name: ${this.systemAgent.name}\n` +
@@ -909,7 +950,8 @@ export class Agent {
     this.pi.registerTool({
       name: "agent_list",
       label: "List Agents",
-      description: "List all available specialist agents. Shows agent names and their descriptions.",
+      description:
+        "List all available specialist agents. Shows agent names and their descriptions.",
       parameters: Type.Object({}),
       execute: async (_toolCallId, _params, _signal, _onUpdate, _ctx) => {
         const profiles = this.getProfiles();
@@ -963,7 +1005,10 @@ export class Agent {
                 text: "Delegation not allowed. This agent received the task via delegation and cannot delegate further.",
               },
             ],
-            details: { status: "error", reason: "delegation_not_allowed" } as DelegationResult,
+            details: {
+              status: "error",
+              reason: "delegation_not_allowed",
+            } as DelegationResult,
           };
         }
 
@@ -972,7 +1017,14 @@ export class Agent {
         if (onUpdate) {
           onUpdate({
             content: [{ type: "text", text: `Delegating to ${agent}...` }],
-            details: { agentName: agent, task, status: "delegating", elapsed: 0, exitCode: 0, fullOutput: "" } as DelegationResult,
+            details: {
+              agentName: agent,
+              task,
+              status: "delegating",
+              elapsed: 0,
+              exitCode: 0,
+              fullOutput: "",
+            } as DelegationResult,
           });
         }
 
@@ -1035,19 +1087,589 @@ export class Agent {
           typeof details.elapsed === "number"
             ? Math.round(details.elapsed / 1000)
             : 0;
-        const header =
-          theme.fg(color, `${icon} ${details.agentName}`) +
-          theme.fg("dim", ` ${elapsed}s`);
 
-        if (options.expanded && details.fullOutput) {
-          const output =
-            details.fullOutput.length > 4000
-              ? details.fullOutput.slice(0, 4000) + "\n... [truncated]"
-              : details.fullOutput;
-          return new Text(header + "\n" + theme.fg("muted", output), 0, 0);
+        const sep = theme.fg("dim", "─".repeat(50));
+        const header =
+          theme.fg("accent", sep) +
+          "\n" +
+          theme.fg(color, `→ ${details.agentName} `) +
+          theme.fg("dim", `${elapsed}s`);
+
+        if (options.expanded) {
+          const taskText = details.task || "(no task)";
+          const output = details.fullOutput || "(no output)";
+          const truncated =
+            output.length > 6000
+              ? output.slice(0, 6000) + "\n... [truncated]"
+              : output;
+
+          return new Text(
+            header +
+              "\n\n" +
+              theme.fg("accent", "Task: ") +
+              theme.fg("text", taskText) +
+              "\n\n" +
+              theme.fg("accent", "Result:") +
+              "\n" +
+              theme.fg("muted", truncated) +
+              "\n" +
+              theme.fg(
+                "dim",
+                "─────────────────────────────────────────────────",
+              ),
+            0,
+            0,
+          );
         }
 
-        return new Text(header, 0, 0);
+        const preview = details.fullOutput
+          ? details.fullOutput.slice(0, 150) +
+            (details.fullOutput.length > 150 ? "..." : "")
+          : "(no output)";
+        return new Text(
+          theme.fg(color, `→ ${details.agentName} `) +
+            theme.fg("dim", `${elapsed}s`) +
+            theme.fg("muted", `\n→ ${preview}`),
+          0,
+          0,
+        );
+      },
+    });
+  }
+
+  private registerToolsTools(): void {
+    this.pi.registerTool({
+      name: "tools_list",
+      label: "List Tools",
+      description:
+        "List all available tools with optional filtering.\n\n" +
+        "Use this tool to discover what tools are available in the current session.\n\n" +
+        "Parameters:\n" +
+        "- filter: Optional name filter (case-insensitive)\n" +
+        "- scope: Filter by source (all, user, project, builtin)\n" +
+        "- active: Show only currently active tools",
+      parameters: Type.Object({
+        filter: Type.Optional(
+          Type.String({
+            description:
+              "Filter tools by name (case-insensitive substring match)",
+          }),
+        ),
+        scope: Type.Optional(
+          Type.Union(
+            [
+              Type.Literal("all"),
+              Type.Literal("user"),
+              Type.Literal("project"),
+              Type.Literal("builtin"),
+            ],
+            { description: "Filter by tool source scope" },
+          ),
+        ),
+        active: Type.Optional(
+          Type.Boolean({
+            description: "Only show active (enabled) tools",
+          }),
+        ),
+      }),
+      execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+        const allTools = this.pi.getAllTools();
+        const activeTools = new Set(this.pi.getActiveTools());
+
+        let tools = allTools;
+
+        if (params.filter) {
+          const filter = params.filter.toLowerCase();
+          tools = tools.filter((t) => t.name.toLowerCase().includes(filter));
+        }
+
+        if (params.scope && params.scope !== "all") {
+          tools = tools.filter((t) => t.sourceInfo?.scope === params.scope);
+        }
+
+        if (params.active) {
+          tools = tools.filter((t) => activeTools.has(t.name));
+        }
+
+        if (tools.length === 0) {
+          return {
+            content: [
+              { type: "text", text: "No tools found matching your criteria." },
+            ],
+            details: { count: 0, tools: [] },
+          };
+        }
+
+        const lines: string[] = [];
+        lines.push(`Available Tools (${tools.length}):`);
+        lines.push("");
+
+        for (const tool of tools) {
+          const active = activeTools.has(tool.name)
+            ? " [active]"
+            : " [disabled]";
+          const source = tool.sourceInfo?.source || "unknown";
+          lines.push(`- ${tool.name}${active}`);
+          lines.push(`  ${tool.description.split("\n")[0]}`);
+          lines.push(`  Source: ${source}`);
+        }
+
+        return {
+          content: [{ type: "text", text: lines.join("\n") }],
+          details: {
+            count: tools.length,
+            tools: tools.map((t) => ({
+              name: t.name,
+              description: t.description,
+              source: t.sourceInfo?.source,
+              scope: t.sourceInfo?.scope,
+              isActive: activeTools.has(t.name),
+            })),
+          },
+        };
+      },
+
+      renderCall(args, theme) {
+        const filter = (args as any).filter;
+        const preview = filter ? ` filter: "${filter}"` : "";
+        return new Text(
+          theme.fg("toolTitle", theme.bold("tools_list")) +
+            theme.fg("dim", " — ") +
+            theme.fg("muted", `list tools${preview}`),
+          0,
+          0,
+        );
+      },
+
+      renderResult(result, options, theme) {
+        const details = result.details as any;
+        const count = details?.count || 0;
+        const firstContent = result.content?.[0] as any;
+        const filter =
+          firstContent?.text?.match(/filter: "(.*?)"/)?.[1] || undefined;
+
+        if (!options.expanded) {
+          const filterText = filter ? ` filter: "${filter}"` : "";
+          const activeCount =
+            details?.tools?.filter((t: any) => t.isActive).length || 0;
+          const badge =
+            count > 0
+              ? ` (${count}${activeCount < count ? "/" + activeCount : ""})`
+              : "";
+
+          return new Text(
+            theme.fg("toolTitle", "🛠 tools_list") +
+              theme.fg("accent", badge) +
+              theme.fg("muted", filterText),
+            0,
+            0,
+          );
+        }
+
+        if (count === 0) {
+          return new Text(
+            theme.fg("dim", "No tools found matching your criteria."),
+            0,
+            0,
+          );
+        }
+
+        const lines: string[] = [];
+        lines.push(theme.fg("accent", "─".repeat(50)));
+        lines.push(
+          theme.fg("accent", "📋 Tools List") +
+            theme.fg("dim", ` (${count} tools)`),
+        );
+        lines.push(theme.fg("accent", "─".repeat(50)));
+
+        for (const tool of details.tools) {
+          const status = tool.isActive
+            ? theme.fg("success", "●")
+            : theme.fg("dim", "○");
+          lines.push(status + " " + theme.fg("text", tool.name));
+          const desc = (tool.description || "").split("\n")[0];
+          const truncatedDesc =
+            desc.length > 55 ? desc.slice(0, 52) + "..." : desc;
+          lines.push("  " + theme.fg("muted", truncatedDesc));
+        }
+
+        lines.push(theme.fg("accent", "═".repeat(50)));
+
+        return new Text(lines.join("\n"), 0, 0);
+      },
+    });
+
+    this.pi.registerTool({
+      name: "tools_search",
+      label: "Search Tools",
+      description:
+        "Search tools by name or description with relevance ranking.\n\n" +
+        "Returns ranked results sorted by match quality:\n" +
+        "- Exact name match: highest priority\n" +
+        "- Name starts with query: high priority\n" +
+        "- Name contains query: medium priority\n" +
+        "- Description contains query: lower priority\n\n" +
+        "Parameters:\n" +
+        "- query: Search term (required)\n" +
+        "- category: Filter by name prefix (e.g., 'agent_', 'team_')\n" +
+        "- limit: Maximum results (default: 10)",
+      parameters: Type.Object({
+        query: Type.String({
+          description: "Search query (matches name or description)",
+        }),
+        category: Type.Optional(
+          Type.String({
+            description:
+              "Filter by tool name prefix (e.g., 'agent_', 'team_', 'chain_', 'tools_')",
+          }),
+        ),
+        limit: Type.Optional(
+          Type.Number({
+            description: "Maximum results to return",
+            default: 10,
+          }),
+        ),
+      }),
+      execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+        const allTools = this.pi.getAllTools();
+        const activeTools = new Set(this.pi.getActiveTools());
+
+        const query = params.query.toLowerCase();
+        const limit = params.limit || 10;
+        const category = params.category?.toLowerCase();
+
+        const scored = allTools.map((tool) => {
+          let score = 0;
+          const name = tool.name.toLowerCase();
+          const desc = tool.description.toLowerCase();
+
+          if (name === query) {
+            score = 100;
+          } else if (name.startsWith(query)) {
+            score = 80;
+          } else if (name.includes(query)) {
+            score = 60;
+          } else if (desc.includes(query)) {
+            score = 40;
+          }
+
+          if (category && !name.startsWith(category)) {
+            score = 0;
+          }
+
+          return { tool, score };
+        });
+
+        const results = scored
+          .filter((r) => r.score > 0)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, limit);
+
+        if (results.length === 0) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `No tools found matching "${params.query}".`,
+              },
+            ],
+            details: { count: 0, query: params.query, tools: [] },
+          };
+        }
+
+        const lines: string[] = [];
+        lines.push(
+          `Search Results for "${params.query}" (${results.length} matches):`,
+        );
+        lines.push("");
+
+        for (let i = 0; i < results.length; i++) {
+          const { tool, score } = results[i];
+          const active = activeTools.has(tool.name) ? " [active]" : "";
+          lines.push(`${i + 1}. [${tool.name}] (${score} pts)${active}`);
+          lines.push(`   ${tool.description.split("\n")[0]}`);
+        }
+
+        lines.push("");
+        lines.push(
+          `Tip: Use tools_info for detailed information about a specific tool.`,
+        );
+
+        return {
+          content: [{ type: "text", text: lines.join("\n") }],
+          details: {
+            count: results.length,
+            query: params.query,
+            tools: results.map((r) => ({
+              name: r.tool.name,
+              description: r.tool.description,
+              score: r.score,
+              isActive: activeTools.has(r.tool.name),
+            })),
+          },
+        };
+      },
+
+      renderCall(args, theme) {
+        const query = (args as any).query || "";
+        const preview = query.length > 30 ? query.slice(0, 27) + "..." : query;
+        return new Text(
+          theme.fg("toolTitle", theme.bold("tools_search")) +
+            theme.fg("dim", " — ") +
+            theme.fg("accent", `"${preview}"`),
+          0,
+          0,
+        );
+      },
+
+      renderResult(result, options, theme) {
+        const details = result.details as any;
+        const count = details?.count || 0;
+        const query = details?.query || "";
+
+        if (!options.expanded) {
+          const preview =
+            query.length > 20 ? query.slice(0, 17) + "..." : query;
+          const badge = count > 0 ? ` (${count})` : "";
+
+          return new Text(
+            theme.fg("toolTitle", "🔍 tools_search") +
+              theme.fg("accent", badge) +
+              theme.fg("dim", ` "${preview}"`),
+            0,
+            0,
+          );
+        }
+
+        if (count === 0) {
+          return new Text(
+            theme.fg("dim", `No tools found matching "${query}".`),
+            0,
+            0,
+          );
+        }
+
+        const lines: string[] = [];
+        lines.push(theme.fg("accent", "─".repeat(50)));
+        lines.push(
+          theme.fg("accent", "🔍 Search Results") +
+            theme.fg("dim", ` for "${query}" (${count} matches)`),
+        );
+        lines.push(theme.fg("accent", "─".repeat(50)));
+
+        for (let i = 0; i < details.tools.length; i++) {
+          const tool = details.tools[i];
+          const num = (i + 1).toString().padStart(2, " ");
+          const active = tool.isActive
+            ? theme.fg("success", "●")
+            : theme.fg("dim", "○");
+          lines.push(
+            theme.fg("dim", num + ".") +
+              " " +
+              active +
+              " " +
+              theme.fg("text", tool.name) +
+              theme.fg("muted", ` (${tool.score}pts)`),
+          );
+          const desc = (tool.description || "").split("\n")[0];
+          const truncatedDesc =
+            desc.length > 50 ? desc.slice(0, 47) + "..." : desc;
+          lines.push("     " + theme.fg("muted", truncatedDesc));
+        }
+
+        lines.push(theme.fg("accent", "═".repeat(50)));
+        lines.push(
+          theme.fg("dim", "Tip: Use tools_info for detailed information."),
+        );
+
+        return new Text(lines.join("\n"), 0, 0);
+      },
+    });
+
+    this.pi.registerTool({
+      name: "tools_info",
+      label: "Tool Info",
+      description:
+        "Get detailed information about a specific tool.\n\n" +
+        "Use this to learn how a tool works, what parameters it accepts,\n" +
+        "and where it comes from.\n\n" +
+        "Parameters:\n" +
+        "- name: Exact tool name (required)\n" +
+        "- includeSchema: Include parameter schema in output",
+      parameters: Type.Object({
+        name: Type.String({
+          description: "Exact tool name to look up",
+        }),
+        includeSchema: Type.Optional(
+          Type.Boolean({
+            description: "Include parameter schema in output",
+            default: false,
+          }),
+        ),
+      }),
+      execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+        const allTools = this.pi.getAllTools();
+        const activeTools = new Set(this.pi.getActiveTools());
+
+        const tool = allTools.find((t) => t.name === params.name);
+
+        if (!tool) {
+          const similar = allTools
+            .filter((t) =>
+              t.name.toLowerCase().includes(params.name.toLowerCase()),
+            )
+            .slice(0, 3)
+            .map((t) => t.name);
+
+          let message = `Tool "${params.name}" not found.`;
+          if (similar.length > 0) {
+            message += `\n\nDid you mean: ${similar.join(", ")}?`;
+          }
+          message += `\n\nUse tools_list or tools_search to find available tools.`;
+
+          return {
+            content: [{ type: "text", text: message }],
+            details: { found: false, name: params.name },
+          };
+        }
+
+        const isActive = activeTools.has(tool.name);
+        const lines: string[] = [];
+
+        lines.push("═".repeat(50));
+        lines.push(`Tool: ${tool.name}`);
+        lines.push("═".repeat(50));
+        lines.push("");
+        lines.push(`Active: ${isActive ? "Yes" : "No"}`);
+        lines.push(`Source: ${tool.sourceInfo?.source || "unknown"}`);
+        lines.push(`Scope: ${tool.sourceInfo?.scope || "unknown"}`);
+        if (tool.sourceInfo?.path) {
+          lines.push(`Path: ${tool.sourceInfo.path}`);
+        }
+        lines.push("");
+        lines.push("Description:");
+        lines.push(tool.description);
+        lines.push("");
+
+        if (params.includeSchema && tool.parameters) {
+          lines.push("Parameters Schema:");
+          try {
+            const schemaStr = JSON.stringify(tool.parameters, null, 2);
+            lines.push(schemaStr);
+          } catch {
+            lines.push("(Unable to display schema)");
+          }
+        }
+
+        return {
+          content: [{ type: "text", text: lines.join("\n") }],
+          details: {
+            found: true,
+            name: tool.name,
+            description: tool.description,
+            source: tool.sourceInfo?.source,
+            scope: tool.sourceInfo?.scope,
+            path: tool.sourceInfo?.path,
+            isActive,
+            parameters: params.includeSchema ? tool.parameters : undefined,
+          },
+        };
+      },
+
+      renderCall(args, theme) {
+        const name = (args as any).name || "?";
+        const includeSchema = (args as any).includeSchema;
+        const schemaNote = includeSchema ? " (with schema)" : "";
+        return new Text(
+          theme.fg("toolTitle", theme.bold("tools_info")) +
+            theme.fg("dim", " — ") +
+            theme.fg("accent", name) +
+            theme.fg("muted", schemaNote),
+          0,
+          0,
+        );
+      },
+
+      renderResult(result, options, theme) {
+        const details = result.details as any;
+
+        if (!details.found) {
+          return new Text(
+            theme.fg("error", "✗ ") +
+              theme.fg("text", `Tool "${details.name}" not found`) +
+              theme.fg("muted", " — use tools_search to find tools"),
+            0,
+            0,
+          );
+        }
+
+        if (!options.expanded) {
+          const status = details.isActive
+            ? theme.fg("success", "●")
+            : theme.fg("dim", "○");
+          const desc = (details.description || "").split("\n")[0];
+          const truncatedDesc =
+            desc.length > 40 ? desc.slice(0, 37) + "..." : desc;
+
+          return new Text(
+            theme.fg("toolTitle", "📎 tools_info") +
+              " " +
+              status +
+              " " +
+              theme.fg("text", details.name) +
+              theme.fg("muted", " — " + truncatedDesc),
+            0,
+            0,
+          );
+        }
+
+        const lines: string[] = [];
+        const status = details.isActive
+          ? theme.fg("success", "Active")
+          : theme.fg("dim", "Disabled");
+
+        lines.push(theme.fg("accent", "─".repeat(50)));
+        lines.push(
+          theme.fg("accent", "📎 Tool Info: ") + theme.fg("text", details.name),
+        );
+        lines.push(theme.fg("accent", "─".repeat(50)));
+        lines.push("");
+        lines.push(
+          status + "  " + theme.fg("muted", `(${details.source || "unknown"})`),
+        );
+        lines.push("");
+        lines.push(theme.fg("accent", "Description:"));
+        lines.push(theme.fg("text", details.description || "(no description)"));
+        lines.push("");
+        lines.push(theme.fg("accent", "Details:"));
+        lines.push(
+          theme.fg("dim", "  Source: ") +
+            theme.fg("muted", details.source || "unknown"),
+        );
+        lines.push(
+          theme.fg("dim", "  Scope: ") +
+            theme.fg("muted", details.scope || "unknown"),
+        );
+        if (details.path) {
+          lines.push(
+            theme.fg("dim", "  Path: ") + theme.fg("muted", details.path),
+          );
+        }
+
+        if (details.parameters) {
+          lines.push("");
+          lines.push(theme.fg("accent", "Parameters Schema:"));
+          try {
+            const schemaStr = JSON.stringify(details.parameters, null, 2);
+            lines.push(theme.fg("muted", schemaStr));
+          } catch {
+            lines.push(theme.fg("dim", "(Unable to display schema)"));
+          }
+        }
+
+        lines.push(theme.fg("accent", "═".repeat(50)));
+
+        return new Text(lines.join("\n"), 0, 0);
       },
     });
   }

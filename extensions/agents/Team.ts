@@ -178,6 +178,8 @@ Use the team_work tool to assign tasks to team members:
       });
     }
 
+    const rolePrompt = this.generateTeamRolePrompt(member, task);
+
     const model = ctx.model
       ? `${ctx.model.provider}/${ctx.model.id}`
       : "openrouter/google/gemini-3-flash-preview";
@@ -199,6 +201,8 @@ Use the team_work tool to assign tasks to team members:
       "off",
       "--append-system-prompt",
       profile.body,
+      "--append-system-prompt",
+      rolePrompt,
       "--session",
       sessionFile,
     ];
@@ -362,7 +366,7 @@ Use the team_work tool to assign tasks to team members:
 
     if (!profile) {
       return Promise.resolve({
-        output: `Agent "${agentName}" not found. Use available_agents to see available agents.`,
+        output: `Agent "${agentName}" not found. Use agent_list to see available agents.`,
         exitCode: 1,
         elapsed: 0,
       });
@@ -546,7 +550,10 @@ Use the team_work tool to assign tasks to team members:
             return;
           }
           if (sub.startsWith("add ")) {
-            const name = sub.slice(4).trim();
+            const parts = sub.slice(4).trim().split(/\s+/);
+            const name = parts[0];
+            const promptArg = parts.slice(1).join(" ");
+
             const profile = validProfiles.find(
               (p) => p.name.toLowerCase() === name.toLowerCase(),
             );
@@ -554,15 +561,28 @@ Use the team_work tool to assign tasks to team members:
               ctx.ui.notify(`Profile "${name}" not found.`, "warning");
               return;
             }
+
+            let prompt = promptArg || "$INPUT";
+            if (!prompt.includes("$INPUT")) {
+              ctx.ui.notify(
+                `Prompt must include $INPUT placeholder.\nExample: /team add ${name} "Task: $INPUT"`,
+                "warning",
+              );
+              return;
+            }
+
             const members = this.agent.getTeamMembers();
             if (!members.includes(profile.name)) {
               members.push(profile.name);
               this.agent.setTeamMembers(members);
-              this.agent.setTeamState(profile.name, "$INPUT");
+              this.agent.setTeamState(profile.name, prompt);
             }
             this.agent.setMode("team");
             this.updateWidget();
-            ctx.ui.notify(`Added ${profile.name} to team.`, "info");
+            ctx.ui.notify(
+              `Added ${profile.name} to team with prompt: "${prompt}"`,
+              "info",
+            );
             return;
           }
           if (sub.startsWith("remove ")) {
@@ -596,7 +616,7 @@ Use the team_work tool to assign tasks to team members:
         const items: TeamItem[] = validProfiles.map((p) => ({
           name: p.name,
           selected: currentTeam.includes(p.name),
-          prompt: currentStates.get(p.name) || "$INPUT",
+          prompt: currentStates.get(p.name) || "Task: $INPUT",
         }));
 
         let cachedLines: string[] | undefined;
@@ -687,7 +707,16 @@ Use the team_work tool to assign tasks to team members:
                   promptMode = false;
                   promptInput.setValue(items[cursor].prompt);
                 } else if (data === "enter" || matchesKey(data, Key.enter)) {
-                  items[cursor].prompt = promptInput.getValue() || "$INPUT";
+                  const prompt = promptInput.getValue() || "$INPUT";
+                  if (!prompt.includes("$INPUT")) {
+                    ctx.ui.notify(
+                      `Prompt must include $INPUT placeholder.\nExample: "Task: $INPUT"`,
+                      "warning",
+                    );
+                    refresh();
+                    return;
+                  }
+                  items[cursor].prompt = prompt;
                   promptMode = false;
                 } else {
                   promptInput.handleInput(data);
@@ -721,6 +750,16 @@ Use the team_work tool to assign tasks to team members:
                 if (selected.length === 0) {
                   done(void 0 as unknown as TeamResult);
                 } else {
+                  for (const item of selected) {
+                    if (!item.prompt.includes("$INPUT")) {
+                      ctx.ui.notify(
+                        `Agent "${item.name}" prompt must include $INPUT.\nUse [P] to set a valid prompt.`,
+                        "warning",
+                      );
+                      refresh();
+                      return;
+                    }
+                  }
                   done({ members: selected });
                 }
               }
@@ -773,14 +812,23 @@ Use the team_work tool to assign tasks to team members:
       description:
         "Build a team of specialist agents.\n\n" +
         "Usage:\n" +
-        "1. Call with list of agent names\n" +
-        "2. Editor opens to set default prompt for each agent (use $INPUT for user input)\n" +
-        "3. Use team_work to assign tasks to team members\n\n" +
-        "Example: team_build [\"Researcher\", \"Coder\", \"Reviewer\"]",
+        "1. Call with agents and prompts array\n" +
+        "2. Each prompt MUST include the $INPUT placeholder\n" +
+        '3. If prompts not provided, defaults to "$INPUT" for each agent\n' +
+        "4. Use team_work to assign tasks to team members\n\n" +
+        'Example: team_build ["Researcher", "Coder"] ["Research: $INPUT", "Write code: $INPUT"]\n\n' +
+        "Placeholder:\n" +
+        "- $INPUT: Replaced with the task assigned via team_work",
       parameters: Type.Object({
         agents: Type.Array(Type.String(), {
           description: "Agent names to include in the team",
         }),
+        prompts: Type.Optional(
+          Type.Array(Type.String(), {
+            description:
+              "Default prompt for each agent (uses $INPUT placeholder)",
+          }),
+        ),
       }),
       execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
         const profiles = this.agent.getProfiles();
@@ -789,6 +837,7 @@ Use the team_work tool to assign tasks to team members:
         );
 
         const agentNames = params.agents as string[];
+        const prompts = (params.prompts as string[] | undefined) || [];
 
         const valid: string[] = [];
         for (const name of agentNames) {
@@ -815,10 +864,26 @@ Use the team_work tool to assign tasks to team members:
           };
         }
 
+        for (let i = 0; i < prompts.length; i++) {
+          const prompt = prompts[i];
+          if (!prompt.includes("$INPUT")) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Invalid prompt for "${valid[i]}": must include $INPUT placeholder.\n\nExample: "Research: $INPUT"`,
+                },
+              ],
+              details: undefined,
+            };
+          }
+        }
+
         const members: string[] = [];
-        for (const name of valid) {
+        for (let i = 0; i < valid.length; i++) {
+          const name = valid[i];
           members.push(name);
-          this.agent.setTeamState(name, "$INPUT");
+          this.agent.setTeamState(name, prompts[i] || "$INPUT");
         }
 
         this.agent.setTeamMembers(members);
@@ -828,11 +893,14 @@ Use the team_work tool to assign tasks to team members:
         ctx.ui.setStatus("agent-team", `Team (${members.length})`);
         ctx.ui.notify(`Team created: ${members.join(", ")}`, "info");
 
+        const promptInfo = members
+          .map((m, i) => `  ${m}: "${prompts[i] || "$INPUT"}"`)
+          .join("\n");
         return {
           content: [
             {
               type: "text",
-              text: `Team created with ${members.length} agents: ${members.join(", ")}\nUse team_work to assign tasks to team members.`,
+              text: `Team created with ${members.length} agents: ${members.join(", ")}\n\nPrompts:\n${promptInfo}\n\nUse team_work to assign tasks to team members.`,
             },
           ],
           details: undefined,
@@ -967,19 +1035,58 @@ Use the team_work tool to assign tasks to team members:
           typeof details.elapsed === "number"
             ? Math.round(details.elapsed / 1000)
             : 0;
-        const header =
-          theme.fg(color, `${icon} ${details.agentName}`) +
-          theme.fg("dim", ` ${elapsed}s`);
 
-        if (options.expanded && details.fullOutput) {
-          const output =
-            details.fullOutput.length > 4000
-              ? details.fullOutput.slice(0, 4000) + "\n... [truncated]"
-              : details.fullOutput;
-          return new Text(header + "\n" + theme.fg("muted", output), 0, 0);
+        const sep = theme.fg("dim", "═".repeat(50));
+        const header =
+          theme.fg("accent", sep) +
+          "\n" +
+          theme.fg(color, `${icon} ${details.agentName} `) +
+          theme.fg("dim", `${elapsed}s`) +
+          "\n" +
+          theme.fg("accent", sep);
+
+        if (options.expanded) {
+          const taskText = details.task || "(no task)";
+          const output = details.fullOutput || "(no output)";
+          const truncated =
+            output.length > 6000
+              ? output.slice(0, 6000) + "\n... [truncated]"
+              : output;
+
+          return new Text(
+            header +
+              "\n\n" +
+              theme.fg("accent", "Task: ") +
+              theme.fg("text", taskText) +
+              "\n\n" +
+              theme.fg("accent", "Result:") +
+              "\n" +
+              theme.fg(
+                "dim",
+                "─────────────────────────────────────────────────\n",
+              ) +
+              theme.fg("muted", truncated) +
+              "\n" +
+              theme.fg(
+                "dim",
+                "─────────────────────────────────────────────────",
+              ),
+            0,
+            0,
+          );
         }
 
-        return new Text(header, 0, 0);
+        const preview = details.fullOutput
+          ? details.fullOutput.slice(0, 150) +
+            (details.fullOutput.length > 150 ? "..." : "")
+          : "(no output)";
+        return new Text(
+          theme.fg(color, `${icon} ${details.agentName} `) +
+            theme.fg("dim", `${elapsed}s`) +
+            theme.fg("muted", `\n→ ${preview}`),
+          0,
+          0,
+        );
       },
     });
 
@@ -1080,19 +1187,52 @@ Use the team_work tool to assign tasks to team members:
           typeof details.elapsed === "number"
             ? Math.round(details.elapsed / 1000)
             : 0;
-        const header =
-          theme.fg(color, `${icon} ${details.agentName}`) +
-          theme.fg("dim", ` ${elapsed}s`);
 
-        if (options.expanded && details.fullOutput) {
-          const output =
-            details.fullOutput.length > 4000
-              ? details.fullOutput.slice(0, 4000) + "\n... [truncated]"
-              : details.fullOutput;
-          return new Text(header + "\n" + theme.fg("muted", output), 0, 0);
+        const sep = theme.fg("dim", "─".repeat(50));
+        const header =
+          theme.fg("accent", sep) +
+          "\n" +
+          theme.fg(color, `→ ${details.agentName} `) +
+          theme.fg("dim", `${elapsed}s`);
+
+        if (options.expanded) {
+          const taskText = details.task || "(no task)";
+          const output = details.fullOutput || "(no output)";
+          const truncated =
+            output.length > 6000
+              ? output.slice(0, 6000) + "\n... [truncated]"
+              : output;
+
+          return new Text(
+            header +
+              "\n\n" +
+              theme.fg("accent", "Task: ") +
+              theme.fg("text", taskText) +
+              "\n\n" +
+              theme.fg("accent", "Result:") +
+              "\n" +
+              theme.fg("muted", truncated) +
+              "\n" +
+              theme.fg(
+                "dim",
+                "─────────────────────────────────────────────────",
+              ),
+            0,
+            0,
+          );
         }
 
-        return new Text(header, 0, 0);
+        const preview = details.fullOutput
+          ? details.fullOutput.slice(0, 150) +
+            (details.fullOutput.length > 150 ? "..." : "")
+          : "(no output)";
+        return new Text(
+          theme.fg(color, `→ ${details.agentName} `) +
+            theme.fg("dim", `${elapsed}s`) +
+            theme.fg("muted", `\n→ ${preview}`),
+          0,
+          0,
+        );
       },
     });
   }
@@ -1118,5 +1258,36 @@ Use the team_work tool to assign tasks to team members:
         }
       }
     } catch {}
+  }
+
+  private generateTeamRolePrompt(agentName: string, task: string): string {
+    return `## Your Role in the Team
+
+You are a specialist team member working under a supervisor agent.
+
+## Your Identity
+- Agent: ${agentName}
+- Your profile defines your expertise and capabilities
+
+## Task Handling
+- The supervisor assigns you specific tasks via the team_work tool
+- Your task is provided in the user prompt you receive
+- Focus solely on completing your assigned task with high quality
+
+## Working Guidelines
+1. **Understand the task**: Read carefully what you're asked to do
+2. **Use your expertise**: Apply your specialist knowledge appropriately
+3. **Be thorough**: Don't skip important details or edge cases
+4. **Be concise**: Output clean, actionable results
+
+## Communication
+- Report results clearly and directly
+- Structure output for easy consumption by the supervisor
+- If you encounter issues, explain them clearly
+
+## Important Notes
+- You work as part of a team - the supervisor coordinates all members
+- Your output will be reviewed and synthesized by the supervisor
+- Complete your specific task well - let the supervisor handle coordination`;
   }
 }
