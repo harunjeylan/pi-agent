@@ -19,10 +19,11 @@ interface TeamResult {
 interface TeamDispatchState {
   agentName: string;
   task: string;
-  status: "dispatching" | "running" | "done" | "error";
+  status: "dispatching" | "running" | "done" | "error" | "delegating";
   elapsed: number;
   exitCode: number;
   fullOutput: string;
+  reason?: string;
 }
 
 export class TeamManager {
@@ -31,13 +32,13 @@ export class TeamManager {
   private gridCols = 2;
   private widgetCtx: any;
   private contextWindow = 0;
+  private delegationAllowed = process.env.PI_NO_DELEGATION !== "1";
 
   constructor(pi: ExtensionAPI, agent: Agent) {
     this.pi = pi;
     this.agent = agent;
     this.dispatchAgent = this.dispatchAgent.bind(this);
     this.registerCommands();
-    this.registerTools();
     this.registerTeamTools();
     this.registerListeners();
   }
@@ -103,14 +104,14 @@ ${memberList}
 
 ${agentCatalog}
 
-## How to Dispatch Tasks
-Use the dispatch_agent tool with:
-- agent: The specialist name
+## How to Assign Tasks
+Use the team_work tool to assign tasks to team members:
+- agent: Team member name
 - task: Clear, focused task description
 
 ## Rules
 - NEVER read, write, or execute code directly — you have no such tools
-- ALWAYS use dispatch_agent to get work done
+- ALWAYS use team_work to get work done
 - Keep tasks focused — one clear objective per dispatch
 - If a specialist fails, retry once, then try a different specialist
 - Summarize results clearly for the user`,
@@ -337,6 +338,134 @@ Use the dispatch_agent tool with:
           elapsed: Date.now() - startTime,
         });
         this.updateWidget();
+        resolve({
+          output: `Error spawning agent: ${err.message}`,
+          exitCode: 1,
+          elapsed: Date.now() - startTime,
+        });
+      });
+    });
+  }
+
+  private delegateAgent(
+    agentName: string,
+    task: string,
+    ctx: any,
+  ): Promise<{ output: string; exitCode: number; elapsed: number }> {
+    const profiles = this.agent.getProfiles();
+    const profile = profiles.find(
+      (p) =>
+        p.name.toLowerCase() === agentName.toLowerCase() ||
+        p.name.toLowerCase().replace(/\s+/g, "-") ===
+          agentName.toLowerCase().replace(/\s+/g, "-"),
+    );
+
+    if (!profile) {
+      return Promise.resolve({
+        output: `Agent "${agentName}" not found. Use available_agents to see available agents.`,
+        exitCode: 1,
+        elapsed: 0,
+      });
+    }
+
+    const model = ctx.model
+      ? `${ctx.model.provider}/${ctx.model.id}`
+      : "openrouter/google/gemini-3-flash-preview";
+
+    const tools = profile.tools?.join(",") || "read,bash,grep,find,ls,edit";
+    const sessionDir = this.agent.getSessionDir();
+    const sessionFile = join(
+      sessionDir,
+      `delegate-${agentName.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}.json`,
+    );
+
+    const args = [
+      "--mode",
+      "json",
+      "-p",
+      "--model",
+      model,
+      "--tools",
+      tools,
+      "--thinking",
+      "off",
+      "--append-system-prompt",
+      profile.body,
+      "--session",
+      sessionFile,
+    ];
+
+    args.push(task);
+
+    const startTime = Date.now();
+    const textChunks: string[] = [];
+
+    return new Promise((resolve) => {
+      const proc = spawn("pi", args, {
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, PI_NO_DELEGATION: "1" },
+      });
+
+      let buffer = "";
+
+      proc.stdout!.setEncoding("utf-8");
+      proc.stdout!.on("data", (chunk: string) => {
+        buffer += chunk;
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const event = JSON.parse(line);
+            if (event.type === "message_update") {
+              const delta = event.assistantMessageEvent;
+              if (delta?.type === "text_delta") {
+                textChunks.push(delta.delta || "");
+              }
+            }
+          } catch {}
+        }
+      });
+
+      proc.stderr!.setEncoding("utf-8");
+      proc.stderr!.on("data", () => {});
+
+      proc.on("close", (code) => {
+        if (buffer.trim()) {
+          try {
+            const event = JSON.parse(buffer);
+            if (event.type === "message_update") {
+              const delta = event.assistantMessageEvent;
+              if (delta?.type === "text_delta") {
+                textChunks.push(delta.delta || "");
+              }
+            }
+          } catch {}
+        }
+
+        const elapsed = Date.now() - startTime;
+        const exitCode = code ?? 1;
+        const full = textChunks.join("");
+
+        ctx.ui.notify(
+          `Delegated to ${agentName} ${exitCode === 0 ? "done" : "error"} in ${Math.round(elapsed / 1000)}s`,
+          exitCode === 0 ? "info" : "error",
+        );
+
+        resolve({
+          output: full,
+          exitCode,
+          elapsed,
+        });
+
+        try {
+          if (existsSync(sessionFile)) {
+            unlinkSync(sessionFile);
+          }
+        } catch {}
+      });
+
+      proc.on("error", (err) => {
         resolve({
           output: `Error spawning agent: ${err.message}`,
           exitCode: 1,
@@ -617,7 +746,7 @@ Use the dispatch_agent tool with:
           }
           this.agent.setTeamMembers(result.members.map((m) => m.name));
           this.agent.setMode("team");
-          this.pi.setActiveTools(["dispatch_agent"]);
+          this.pi.setActiveTools(["team_work"]);
           this.updateWidget();
 
           const size = result.members.length;
@@ -626,10 +755,10 @@ Use the dispatch_agent tool with:
           ctx.ui.setStatus("agent-team", `Team (${size})`);
           ctx.ui.notify(
             `Team activated: ${result.members.map((m) => m.name).join(", ")}\n` +
-            `Supervisor will delegate tasks to team members.\n` +
-            `/team        Modify team\n` +
-            `/team-grid   Set columns\n` +
-            `/team-clear  Return to single mode`,
+              `Supervisor will delegate tasks to team members.\n` +
+              `/team        Modify team\n` +
+              `/team-grid   Set columns\n` +
+              `/team-clear  Return to single mode`,
             "info",
           );
         }
@@ -637,16 +766,135 @@ Use the dispatch_agent tool with:
     });
   }
 
-  private registerTools(): void {
+  private registerTeamTools(): void {
     this.pi.registerTool({
-      name: "dispatch_agent",
-      label: "Dispatch Agent",
+      name: "team_build",
+      label: "Build Team",
       description:
-        "Dispatch a task to a specialist agent. The agent will execute the task and return the result.",
+        "Build a team of specialist agents.\n\n" +
+        "Usage:\n" +
+        "1. Call with list of agent names\n" +
+        "2. Editor opens to set default prompt for each agent (use $INPUT for user input)\n" +
+        "3. Use team_work to assign tasks to team members\n\n" +
+        "Example: team_build [\"Researcher\", \"Coder\", \"Reviewer\"]",
       parameters: Type.Object({
-        agent: Type.String({ description: "Agent name (case-insensitive)" }),
+        agents: Type.Array(Type.String(), {
+          description: "Agent names to include in the team",
+        }),
+      }),
+      execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+        const profiles = this.agent.getProfiles();
+        const validProfiles = profiles.filter(
+          (p) => p && typeof p.name === "string",
+        );
+
+        const agentNames = params.agents as string[];
+
+        const valid: string[] = [];
+        for (const name of agentNames) {
+          const normalized = name.toLowerCase().replace(/\s+/g, "-");
+          const profile = validProfiles.find(
+            (p) =>
+              p.name.toLowerCase() === name.toLowerCase() ||
+              p.name.toLowerCase().replace(/\s+/g, "-") === normalized,
+          );
+          if (profile) {
+            valid.push(profile.name);
+          }
+        }
+
+        if (valid.length === 0) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "No valid agents specified. Use agent_list to see available agents.",
+              },
+            ],
+            details: undefined,
+          };
+        }
+
+        const members: string[] = [];
+        for (const name of valid) {
+          members.push(name);
+          this.agent.setTeamState(name, "$INPUT");
+        }
+
+        this.agent.setTeamMembers(members);
+        this.agent.setMode("team");
+        this.pi.setActiveTools(["team_work", "team_clear"]);
+        this.agent.registerTeamWidget(ctx);
+        ctx.ui.setStatus("agent-team", `Team (${members.length})`);
+        ctx.ui.notify(`Team created: ${members.join(", ")}`, "info");
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Team created with ${members.length} agents: ${members.join(", ")}\nUse team_work to assign tasks to team members.`,
+            },
+          ],
+          details: undefined,
+        };
+      },
+    });
+
+    this.pi.registerTool({
+      name: "team_clear",
+      label: "Clear Team",
+      description: "Clear the current team and return to single agent mode.",
+      parameters: Type.Object({}),
+      execute: async (_toolCallId, _params, _signal, _onUpdate, ctx) => {
+        const members = this.agent.getTeamMembers();
+
+        if (members.length === 0) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "No team to clear. Already in single mode.",
+              },
+            ],
+            details: undefined,
+          };
+        }
+
+        const count = members.length;
+        this.agent.setTeamMembers([]);
+        this.agent.setMode("single");
+        this.pi.setActiveTools([]);
+        ctx.ui.setWidget("agent-team", undefined);
+        ctx.ui.setStatus("agent-team", undefined);
+        ctx.ui.notify(`Team cleared. Returned to single mode.`, "info");
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Team cleared. ${count} agents removed. Returned to single agent mode.`,
+            },
+          ],
+          details: undefined,
+        };
+      },
+    });
+
+    this.pi.registerTool({
+      name: "team_work",
+      label: "Assign Team Task",
+      description:
+        "Assign a parallel task to a team member.\n\n" +
+        "- Each team member works independently on their task\n" +
+        "- All tasks run in parallel (use team_build first)\n" +
+        "- Returns results when all team members finish\n\n" +
+        "Parameters:\n" +
+        "- agent: Team member name\n" +
+        "- task: Task description",
+      parameters: Type.Object({
+        agent: Type.String({ description: "Team member name" }),
         task: Type.String({
-          description: "Task description for the agent to execute",
+          description: "Task description for the team member",
         }),
       }),
 
@@ -655,7 +903,7 @@ Use the dispatch_agent tool with:
 
         if (onUpdate) {
           onUpdate({
-            content: [{ type: "text", text: `Dispatching to ${agent}...` }],
+            content: [{ type: "text", text: `Assigning to ${agent}...` }],
             details: { agent, task, status: "dispatching" },
           });
         }
@@ -673,7 +921,7 @@ Use the dispatch_agent tool with:
         return {
           content: [{ type: "text", text: `${summary}\n\n${truncated}` }],
           details: {
-            agent,
+            agentName: agent,
             task,
             status,
             elapsed: result.elapsed,
@@ -688,7 +936,7 @@ Use the dispatch_agent tool with:
         const task = (args as any).task || "";
         const preview = task.length > 60 ? task.slice(0, 57) + "..." : task;
         return new Text(
-          theme.fg("toolTitle", theme.bold("dispatch_agent ")) +
+          theme.fg("toolTitle", theme.bold("team_work ")) +
             theme.fg("accent", agentName) +
             theme.fg("dim", " — ") +
             theme.fg("muted", preview),
@@ -734,110 +982,117 @@ Use the dispatch_agent tool with:
         return new Text(header, 0, 0);
       },
     });
-  }
 
-  private registerTeamTools(): void {
     this.pi.registerTool({
-      name: "create_team",
-      label: "Create Team",
-      description: "Create and activate a team of specialist agents for complex tasks",
+      name: "team_delegate",
+      label: "Delegate to Agent",
+      description:
+        "Delegate a task to a specialized agent (not a team member).\n\n" +
+        "- Sequential: waits for completion before continuing\n" +
+        "- No re-delegation: delegated agent cannot delegate further\n" +
+        "- Use for tasks requiring expertise different from any team member\n\n" +
+        "Parameters:\n" +
+        "- agent: Agent name (use agent_list to find available agents)\n" +
+        "- task: Task description",
       parameters: Type.Object({
-        agents: Type.Array(Type.String(), {
-          description: "Agent names to include in the team",
-        }),
+        agent: Type.String({ description: "Agent name" }),
+        task: Type.String({ description: "Task to delegate" }),
       }),
-      execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
-        const profiles = this.agent.getProfiles();
-        const validProfiles = profiles.filter(
-          (p) => p && typeof p.name === "string",
-        );
 
-        const agentNames = params.agents as string[];
-
-        const valid: string[] = [];
-        for (const name of agentNames) {
-          const normalized = name.toLowerCase().replace(/\s+/g, "-");
-          const profile = validProfiles.find(
-            (p) =>
-              p.name.toLowerCase() === name.toLowerCase() ||
-              p.name.toLowerCase().replace(/\s+/g, "-") === normalized,
-          );
-          if (profile) {
-            valid.push(profile.name);
-          }
-        }
-
-        if (valid.length === 0) {
+      execute: async (_toolCallId, params, _signal, onUpdate, ctx) => {
+        if (!this.delegationAllowed) {
           return {
             content: [
               {
                 type: "text",
-                text: "No valid agents specified. Use available_agents to see available agents.",
+                text: "Delegation not allowed. This agent received task via delegation.",
               },
             ],
-            details: undefined,
+            details: { status: "error", reason: "delegation_not_allowed" },
           };
         }
 
-        const members: string[] = [];
-        for (const name of valid) {
-          members.push(name);
-          this.agent.setTeamState(name, "$INPUT");
+        const { agent, task } = params as { agent: string; task: string };
+
+        if (onUpdate) {
+          onUpdate({
+            content: [{ type: "text", text: `Delegating to ${agent}...` }],
+            details: { agentName: agent, task, status: "delegating" },
+          });
         }
 
-        this.agent.setTeamMembers(members);
-        this.agent.setMode("team");
-        this.pi.setActiveTools(["dispatch_agent", "clear_team"]);
-        this.agent.registerTeamWidget(ctx);
-        ctx.ui.setStatus("agent-team", `Team (${members.length})`);
-        ctx.ui.notify(`Team created: ${members.join(", ")}`, "info");
+        const result = await this.delegateAgent(agent, task, ctx);
+
+        const truncated =
+          result.output.length > 8000
+            ? result.output.slice(0, 8000) + "\n\n... [truncated]"
+            : result.output;
+
+        const status = result.exitCode === 0 ? "done" : "error";
+        const summary = `[${agent}] ${status} in ${Math.round(result.elapsed / 1000)}s`;
 
         return {
-          content: [
-            {
-              type: "text",
-              text: `Team created with ${members.length} agents: ${members.join(", ")}\nUse dispatch_agent to delegate tasks to team members.`,
-            },
-          ],
-          details: undefined,
+          content: [{ type: "text", text: `${summary}\n\n${truncated}` }],
+          details: {
+            agentName: agent,
+            task,
+            status,
+            elapsed: result.elapsed,
+            exitCode: result.exitCode,
+            fullOutput: result.output,
+          },
         };
       },
-    });
 
-    this.pi.registerTool({
-      name: "clear_team",
-      label: "Clear Team",
-      description: "Clear the current team and return to single agent mode",
-      parameters: Type.Object({}),
-      execute: async (_toolCallId, _params, _signal, _onUpdate, ctx) => {
-        const members = this.agent.getTeamMembers();
+      renderCall(args, theme) {
+        const agentName = (args as any).agent || "?";
+        const task = (args as any).task || "";
+        const preview = task.length > 60 ? task.slice(0, 57) + "..." : task;
+        return new Text(
+          theme.fg("toolTitle", theme.bold("team_delegate ")) +
+            theme.fg("accent", agentName) +
+            theme.fg("dim", " — ") +
+            theme.fg("muted", preview),
+          0,
+          0,
+        );
+      },
 
-        if (members.length === 0) {
-          return {
-            content: [
-              { type: "text", text: "No team to clear. Already in single mode." },
-            ],
-            details: undefined,
-          };
+      renderResult(result, options, theme) {
+        const details = result.details as TeamDispatchState;
+        if (!details || details.reason === "delegation_not_allowed") {
+          const text = result.content[0];
+          return new Text(text?.type === "text" ? text.text : "", 0, 0);
         }
 
-        const count = members.length;
-        this.agent.setTeamMembers([]);
-        this.agent.setMode("single");
-        this.pi.setActiveTools([]);
-        ctx.ui.setWidget("agent-team", undefined);
-        ctx.ui.setStatus("agent-team", undefined);
-        ctx.ui.notify(`Team cleared. Returned to single mode.`, "info");
+        if (options.isPartial || details.status === "delegating") {
+          return new Text(
+            theme.fg("accent", `→ ${details.agentName || "?"}`) +
+              theme.fg("dim", " delegating..."),
+            0,
+            0,
+          );
+        }
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Team cleared. ${count} agents removed. Returned to single agent mode.`,
-            },
-          ],
-          details: undefined,
-        };
+        const icon = details.status === "done" ? "✓" : "✗";
+        const color = details.status === "done" ? "success" : "error";
+        const elapsed =
+          typeof details.elapsed === "number"
+            ? Math.round(details.elapsed / 1000)
+            : 0;
+        const header =
+          theme.fg(color, `${icon} ${details.agentName}`) +
+          theme.fg("dim", ` ${elapsed}s`);
+
+        if (options.expanded && details.fullOutput) {
+          const output =
+            details.fullOutput.length > 4000
+              ? details.fullOutput.slice(0, 4000) + "\n... [truncated]"
+              : details.fullOutput;
+          return new Text(header + "\n" + theme.fg("muted", output), 0, 0);
+        }
+
+        return new Text(header, 0, 0);
       },
     });
   }
@@ -847,7 +1102,7 @@ Use the dispatch_agent tool with:
   }
 
   public restrictToDispatchAgent(): void {
-    this.pi.setActiveTools(["dispatch_agent"]);
+    this.pi.setActiveTools(["team_work"]);
   }
 
   public clearAgentSessions(cwd: string): void {

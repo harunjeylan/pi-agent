@@ -614,9 +614,14 @@ ${agentCatalog}
 
   private registerTools(): void {
     this.pi.registerTool({
-      name: "run_chain",
-      label: "Run Chain",
-      description: "Execute the chain pipeline. Each step runs sequentially - output feeds into next.",
+      name: "chain_execute",
+      label: "Execute Chain",
+      description:
+        "Execute the chain pipeline.\n\n" +
+        "- Sequential: each step runs one after another\n" +
+        "- Output feeds into next: use $INPUT in prompts to get previous output\n" +
+        "- Use $ORIGINAL to access the initial task\n\n" +
+        "Prerequisites: Use chain_build first to create the pipeline.",
       parameters: Type.Object({
         task: Type.String({ description: "Initial task for the first agent" }),
       }),
@@ -683,7 +688,7 @@ ${agentCatalog}
 
         return {
           content: [{ type: "text", text: `Chain complete:\n${results.join("\n")}\n\nFinal output:\n${previousOutput}` }],
-          details: { status: "done", steps: steps.length }
+          details: { status: "done", steps: steps.length, output: previousOutput }
         };
       },
 
@@ -691,7 +696,7 @@ ${agentCatalog}
         const task = (args as any).task || "";
         const preview = task.length > 60 ? task.slice(0, 57) + "..." : task;
         return new Text(
-          theme.fg("toolTitle", theme.bold("run_chain ")) +
+          theme.fg("toolTitle", theme.bold("chain_execute ")) +
             theme.fg("dim", "— ") +
             theme.fg("muted", preview),
           0, 0,
@@ -701,11 +706,12 @@ ${agentCatalog}
       renderResult(result, options, theme) {
         const details = result.details as any;
         if (details?.status === "done") {
-          return new Text(
-            theme.fg("success", "✓ ") + theme.fg("accent", "Chain") +
-              theme.fg("dim", ` (${details.steps} steps)`),
-            0, 0,
-          );
+          const summary = theme.fg("success", "✓ ") + theme.fg("accent", "Chain") +
+            theme.fg("dim", ` (${details.steps} steps)`);
+          if (options.expanded && details.output) {
+            return new Text(summary + "\n" + details.output, 0, 0);
+          }
+          return new Text(summary, 0, 0);
         }
         if (details?.status === "error") {
           return new Text(
@@ -721,9 +727,16 @@ ${agentCatalog}
 
   private registerChainTools(): void {
     this.pi.registerTool({
-      name: "create_chain",
-      label: "Create Chain",
-      description: "Create a chain of agents for sequential workflow",
+      name: "chain_build",
+      label: "Build Chain",
+      description:
+        "Build a sequential pipeline of agents.\n\n" +
+        "Usage:\n" +
+        "1. Call with list of agent names in order (first to last)\n" +
+        "2. Editor opens to set prompt for each step\n" +
+        "3. Use $INPUT to get output from previous step\n" +
+        "4. Use chain_execute to run the pipeline\n\n" +
+        "Example: chain_build [\"Researcher\", \"Summarizer\", \"Reviewer\"]",
       parameters: Type.Object({
         agents: Type.Array(Type.String(), {
           description: "Agent names in order (first to last)",
@@ -751,7 +764,7 @@ ${agentCatalog}
         if (valid.length === 0) {
           return {
             content: [
-              { type: "text", text: "No valid agents specified. Use available_agents to see available agents." },
+              { type: "text", text: "No valid agents specified. Use agent_list to see available agents." },
             ],
             details: undefined,
           };
@@ -772,7 +785,7 @@ ${agentCatalog}
           content: [
             {
               type: "text",
-              text: `Chain created with ${steps.length} steps: ${flow}\nUse run_chain to execute the pipeline.`,
+              text: `Chain created with ${steps.length} steps: ${flow}\nUse chain_execute to run the pipeline.`,
             },
           ],
           details: undefined,
@@ -781,9 +794,9 @@ ${agentCatalog}
     });
 
     this.pi.registerTool({
-      name: "clear_chain",
+      name: "chain_clear",
       label: "Clear Chain",
-      description: "Clear the current chain and return to single agent mode",
+      description: "Clear the current chain and return to single agent mode.",
       parameters: Type.Object({}),
       execute: async (_toolCallId, _params, _signal, _onUpdate, ctx) => {
         const steps = this.agent.getChainSteps();

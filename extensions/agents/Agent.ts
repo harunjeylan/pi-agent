@@ -2,7 +2,7 @@ import { ChildProcess, spawn } from "node:child_process";
 import { getAgentDir, type ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { existsSync, readdirSync, readFileSync } from "fs";
+import { existsSync, readdirSync, readFileSync, unlinkSync } from "fs";
 import { join } from "path";
 
 export type AgentMode = "single" | "team" | "chain" | "swarm";
@@ -78,6 +78,16 @@ export interface AgentExecutionResult {
   contextPct: number;
 }
 
+interface DelegationResult {
+  agentName: string;
+  task: string;
+  status: "delegating" | "done" | "error";
+  elapsed: number;
+  exitCode: number;
+  fullOutput: string;
+  reason?: string;
+}
+
 export class Agent {
   private pi: ExtensionAPI;
 
@@ -101,6 +111,7 @@ export class Agent {
 
   private swarmAgents = new Map<number, SwarmState>();
   private nextSwarmId = 1;
+  private delegationAllowed = process.env.PI_NO_DELEGATION !== "1";
 
   constructor(pi: ExtensionAPI) {
     this.pi = pi;
@@ -286,7 +297,10 @@ export class Agent {
 
   updateChainStepState(index: number, updates: Partial<ChainStepState>): void {
     if (this.chainStepStates[index]) {
-      this.chainStepStates[index] = { ...this.chainStepStates[index], ...updates };
+      this.chainStepStates[index] = {
+        ...this.chainStepStates[index],
+        ...updates,
+      };
     }
   }
 
@@ -343,8 +357,7 @@ export class Agent {
       this.systemAgent?.model ||
       "openrouter/google/gemini-3-flash-preview";
     const tools =
-      agentProfile.tools?.join(",") ||
-      "read,bash,grep,find,ls,edit";
+      agentProfile.tools?.join(",") || "read,bash,grep,find,ls,edit";
 
     const sessionFile = options.sessionKey
       ? join(this._sessionDir, `${options.sessionKey}.json`)
@@ -401,9 +414,16 @@ export class Agent {
           const lastLine = lines[lines.length - 1] || "";
           try {
             const event = JSON.parse(lastLine);
-            if (event.type === "message_update" && event.assistantMessageEvent?.type === "text_delta") {
+            if (
+              event.type === "message_update" &&
+              event.assistantMessageEvent?.type === "text_delta"
+            ) {
               const full = textChunks.join("");
-              const lastFullLine = full.split("\n").filter((l: string) => l.trim()).pop() || "";
+              const lastFullLine =
+                full
+                  .split("\n")
+                  .filter((l: string) => l.trim())
+                  .pop() || "";
               options.onLastWorkUpdate!(lastFullLine);
             }
             if (event.type === "tool_execution_start") {
@@ -437,9 +457,11 @@ export class Agent {
         });
       }, timeout);
 
-      const elapsedTimer = options.onElapsedUpdate ? setInterval(() => {
-        options.onElapsedUpdate!(Date.now() - startTime);
-      }, 1000) : undefined;
+      const elapsedTimer = options.onElapsedUpdate
+        ? setInterval(() => {
+            options.onElapsedUpdate!(Date.now() - startTime);
+          }, 1000)
+        : undefined;
 
       proc.on("close", (code) => {
         clearTimeout(timer);
@@ -473,6 +495,129 @@ export class Agent {
     });
   }
 
+  private delegateAgent(
+    agentName: string,
+    task: string,
+    ctx: any,
+  ): Promise<{ output: string; exitCode: number; elapsed: number }> {
+    const profiles = this.getProfiles();
+    const profile = profiles.find(
+      (p) =>
+        p.name.toLowerCase() === agentName.toLowerCase() ||
+        p.name.toLowerCase().replace(/\s+/g, "-") === agentName.toLowerCase().replace(/\s+/g, "-"),
+    );
+
+    if (!profile) {
+      return Promise.resolve({
+        output: `Agent "${agentName}" not found. Use agent_list to see available agents.`,
+        exitCode: 1,
+        elapsed: 0,
+      });
+    }
+
+    const model = ctx.model
+      ? `${ctx.model.provider}/${ctx.model.id}`
+      : "openrouter/google/gemini-3-flash-preview";
+
+    const tools = profile.tools?.join(",") || "read,bash,grep,find,ls,edit";
+    const sessionFile = join(this._sessionDir, `delegate-${agentName.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}.json`);
+
+    const args = [
+      "--mode",
+      "json",
+      "-p",
+      "--model",
+      model,
+      "--tools",
+      tools,
+      "--thinking",
+      "off",
+      "--append-system-prompt",
+      profile.body,
+      "--session",
+      sessionFile,
+    ];
+
+    args.push(task);
+
+    const startTime = Date.now();
+    const textChunks: string[] = [];
+
+    return new Promise((resolve) => {
+      const proc = spawn("pi", args, {
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, PI_NO_DELEGATION: "1" },
+      });
+
+      let buffer = "";
+
+      proc.stdout!.setEncoding("utf-8");
+      proc.stdout!.on("data", (chunk: string) => {
+        buffer += chunk;
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const event = JSON.parse(line);
+            if (event.type === "message_update") {
+              const delta = event.assistantMessageEvent;
+              if (delta?.type === "text_delta") {
+                textChunks.push(delta.delta || "");
+              }
+            }
+          } catch {}
+        }
+      });
+
+      proc.stderr!.setEncoding("utf-8");
+      proc.stderr!.on("data", () => {});
+
+      proc.on("close", (code) => {
+        if (buffer.trim()) {
+          try {
+            const event = JSON.parse(buffer);
+            if (event.type === "message_update") {
+              const delta = event.assistantMessageEvent;
+              if (delta?.type === "text_delta") {
+                textChunks.push(delta.delta || "");
+              }
+            }
+          } catch {}
+        }
+
+        const elapsed = Date.now() - startTime;
+        const exitCode = code ?? 1;
+        const full = textChunks.join("");
+
+        ctx.ui.notify(
+          `Delegated to ${agentName} ${exitCode === 0 ? "done" : "error"} in ${Math.round(elapsed / 1000)}s`,
+          exitCode === 0 ? "info" : "error",
+        );
+
+        resolve({
+          output: full,
+          exitCode,
+          elapsed,
+        });
+
+        try {
+          if (existsSync(sessionFile)) {
+            unlinkSync(sessionFile);
+          }
+        } catch {}
+      });
+
+      proc.on("error", (err) => {
+        resolve({
+          output: `Error spawning agent: ${err.message}`,
+          exitCode: 1,
+          elapsed: Date.now() - startTime,
+        });
+      });
+    });
+  }
+
   getSystemPrompt(basePrompt: string): { systemPrompt: string } {
     if (!this.systemAgent) {
       return { systemPrompt: basePrompt };
@@ -499,25 +644,35 @@ export class Agent {
       s.length > max ? s.slice(0, max - 3) + "..." : s;
 
     const statusColor =
-      state.status === "idle" ? "dim" :
-      state.status === "running" ? "accent" :
-      state.status === "done" ? "success" : "error";
+      state.status === "idle"
+        ? "dim"
+        : state.status === "running"
+          ? "accent"
+          : state.status === "done"
+            ? "success"
+            : "error";
 
     const statusIcon =
-      state.status === "idle" ? "○" :
-      state.status === "running" ? "●" :
-      state.status === "done" ? "✓" : "✗";
+      state.status === "idle"
+        ? "○"
+        : state.status === "running"
+          ? "●"
+          : state.status === "done"
+            ? "✓"
+            : "✗";
 
     const nameStr = truncate(state.name, w);
     const nameVisible = nameStr.length;
 
     const statusStr = `${statusIcon} ${state.status}`;
-    const timeStr = state.status !== "idle" ? ` ${Math.round(state.elapsed / 1000)}s` : "";
+    const timeStr =
+      state.status !== "idle" ? ` ${Math.round(state.elapsed / 1000)}s` : "";
     const statusLine = theme.fg(statusColor, statusStr + timeStr);
     const statusVisible = statusStr.length + timeStr.length;
 
     const toolStr = state.toolCount > 0 ? `${state.toolCount}` : "";
-    const ctxStr = state.contextPct > 0 ? `${Math.round(state.contextPct)}%` : "";
+    const ctxStr =
+      state.contextPct > 0 ? `${Math.round(state.contextPct)}%` : "";
     const statsParts: string[] = [];
     if (toolStr) statsParts.push(`🛠${toolStr}`);
     if (ctxStr) statsParts.push(`📊${ctxStr}`);
@@ -540,7 +695,10 @@ export class Agent {
 
     return [
       theme.fg("dim", top),
-      border(" " + theme.fg("accent", truncate(state.name, w)), 1 + nameVisible),
+      border(
+        " " + theme.fg("accent", truncate(state.name, w)),
+        1 + nameVisible,
+      ),
       border(" " + statusLine, 1 + statusVisible),
       border(" " + statsLine, 1 + statsVisible),
       border(" " + workLine, 1 + workVisible),
@@ -548,7 +706,12 @@ export class Agent {
     ];
   }
 
-  renderGrid(states: TeamState[], width: number, theme: any, cols: number = 2): string[] {
+  renderGrid(
+    states: TeamState[],
+    width: number,
+    theme: any,
+    cols: number = 2,
+  ): string[] {
     if (states.length === 0) return [theme.fg("dim", "No agents to display")];
 
     const gap = 1;
@@ -557,7 +720,7 @@ export class Agent {
     const rows: string[][] = [];
     for (let i = 0; i < states.length; i += cols) {
       const rowStates = states.slice(i, i + cols);
-      const cards = rowStates.map(s => this.renderCard(s, colWidth, theme));
+      const cards = rowStates.map((s) => this.renderCard(s, colWidth, theme));
 
       while (cards.length < cols) {
         cards.push(Array(5).fill(" ".repeat(colWidth)));
@@ -565,11 +728,11 @@ export class Agent {
 
       const cardHeight = cards[0].length;
       for (let line = 0; line < cardHeight; line++) {
-        rows.push(cards.map(card => card[line] || ""));
+        rows.push(cards.map((card) => card[line] || ""));
       }
     }
 
-    return rows.map(cols => cols.join(" ".repeat(gap)));
+    return rows.map((cols) => cols.join(" ".repeat(gap)));
   }
 
   registerTeamWidget(ctx: any): void {
@@ -586,12 +749,15 @@ export class Agent {
             text.setText(theme.fg("dim", "No team members"));
             return text.render(width);
           }
-          const cols = states.length <= 3 ? states.length : states.length === 4 ? 2 : 3;
+          const cols =
+            states.length <= 3 ? states.length : states.length === 4 ? 2 : 3;
           const output = agent.renderGrid(states, width, theme, cols);
           text.setText(output.join("\n"));
           return text.render(width);
         },
-        invalidate() { text.invalidate(); }
+        invalidate() {
+          text.invalidate();
+        },
       };
     });
   }
@@ -614,21 +780,30 @@ export class Agent {
           const arrowWidth = 5;
           const cols = states.length;
           const totalArrowWidth = arrowWidth * (cols - 1);
-          const colWidth = Math.max(12, Math.floor((width - totalArrowWidth) / cols));
+          const colWidth = Math.max(
+            12,
+            Math.floor((width - totalArrowWidth) / cols),
+          );
 
-          const cards = states.map(s => agent.renderCard({
-            name: s.agent,
-            prompt: "",
-            status: s.status as any,
-            task: "",
-            output: s.output,
-            elapsed: s.elapsed,
-            runCount: 0,
-            sessionFile: "",
-            toolCount: s.toolCount,
-            lastWork: s.lastWork,
-            contextPct: s.contextPct
-          }, colWidth, theme));
+          const cards = states.map((s) =>
+            agent.renderCard(
+              {
+                name: s.agent,
+                prompt: "",
+                status: s.status as any,
+                task: "",
+                output: s.output,
+                elapsed: s.elapsed,
+                runCount: 0,
+                sessionFile: "",
+                toolCount: s.toolCount,
+                lastWork: s.lastWork,
+                contextPct: s.contextPct,
+              },
+              colWidth,
+              theme,
+            ),
+          );
 
           const cardHeight = cards[0].length;
           const arrowRow = 2;
@@ -650,7 +825,9 @@ export class Agent {
           text.setText(outputLines.join("\n"));
           return text.render(width);
         },
-        invalidate() { text.invalidate(); }
+        invalidate() {
+          text.invalidate();
+        },
       };
     });
   }
@@ -667,26 +844,37 @@ export class Agent {
             return text.render(width);
           }
 
-          const cols = swarmAgents.length <= 3 ? swarmAgents.length : swarmAgents.length === 4 ? 2 : 3;
+          const cols =
+            swarmAgents.length <= 3
+              ? swarmAgents.length
+              : swarmAgents.length === 4
+                ? 2
+                : 3;
           const gap = 1;
           const colWidth = Math.floor((width - gap * (cols - 1)) / cols);
 
           const rows: string[] = [];
           for (let i = 0; i < swarmAgents.length; i += cols) {
             const rowAgents = swarmAgents.slice(i, i + cols);
-            const cards = rowAgents.map(a => agent.renderCard({
-              name: `[${a.id}] ${a.task.slice(0, 20)}`,
-              prompt: "",
-              status: a.status as any,
-              task: a.task,
-              output: a.output,
-              elapsed: a.elapsed,
-              runCount: a.turnCount,
-              sessionFile: "",
-              toolCount: a.toolCount,
-              lastWork: a.lastWork,
-              contextPct: a.contextPct
-            }, colWidth, theme));
+            const cards = rowAgents.map((a) =>
+              agent.renderCard(
+                {
+                  name: `[${a.id}] ${a.task.slice(0, 20)}`,
+                  prompt: "",
+                  status: a.status as any,
+                  task: a.task,
+                  output: a.output,
+                  elapsed: a.elapsed,
+                  runCount: a.turnCount,
+                  sessionFile: "",
+                  toolCount: a.toolCount,
+                  lastWork: a.lastWork,
+                  contextPct: a.contextPct,
+                },
+                colWidth,
+                theme,
+              ),
+            );
 
             while (cards.length < cols) {
               cards.push(Array(6).fill(" ".repeat(colWidth)));
@@ -694,7 +882,9 @@ export class Agent {
 
             const cardHeight = cards[0].length;
             for (let line = 0; line < cardHeight; line++) {
-              const rowLine = cards.map(card => card[line] || "").join(" ".repeat(gap));
+              const rowLine = cards
+                .map((card) => card[line] || "")
+                .join(" ".repeat(gap));
               rows.push(rowLine);
             }
           }
@@ -702,7 +892,9 @@ export class Agent {
           text.setText(rows.join("\n"));
           return text.render(width);
         },
-        invalidate() { text.invalidate(); }
+        invalidate() {
+          text.invalidate();
+        },
       };
     });
   }
@@ -715,9 +907,9 @@ export class Agent {
 
   registerAvailableAgentsTool(): void {
     this.pi.registerTool({
-      name: "available_agents",
-      label: "Available Agents",
-      description: "List all available specialist agents",
+      name: "agent_list",
+      label: "List Agents",
+      description: "List all available specialist agents. Shows agent names and their descriptions.",
       parameters: Type.Object({}),
       execute: async (_toolCallId, _params, _signal, _onUpdate, _ctx) => {
         const profiles = this.getProfiles();
@@ -739,6 +931,123 @@ export class Agent {
           content: [{ type: "text", text: `Available agents:\n${list}` }],
           details: undefined,
         };
+      },
+    });
+
+    this.pi.registerTool({
+      name: "agent_delegate",
+      label: "Delegate to Agent",
+      description:
+        "Delegate a task to a specialized agent.\n" +
+        "- Sequential execution: waits for completion before continuing\n" +
+        "- No re-delegation: the delegated agent cannot delegate further\n" +
+        "- Use when task requires expertise different from current agent\n\n" +
+        "Parameters:\n" +
+        "- agent: Target agent name (use agent_list to find available agents)\n" +
+        "- task: The task to delegate",
+      parameters: Type.Object({
+        agent: Type.String({
+          description: "Target agent name (e.g., 'Researcher', 'Coder')",
+        }),
+        task: Type.String({
+          description: "Task description for the delegated agent",
+        }),
+      }),
+
+      execute: async (_toolCallId, params, _signal, onUpdate, ctx) => {
+        if (!this.delegationAllowed) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Delegation not allowed. This agent received the task via delegation and cannot delegate further.",
+              },
+            ],
+            details: { status: "error", reason: "delegation_not_allowed" } as DelegationResult,
+          };
+        }
+
+        const { agent, task } = params as { agent: string; task: string };
+
+        if (onUpdate) {
+          onUpdate({
+            content: [{ type: "text", text: `Delegating to ${agent}...` }],
+            details: { agentName: agent, task, status: "delegating", elapsed: 0, exitCode: 0, fullOutput: "" } as DelegationResult,
+          });
+        }
+
+        const result = await this.delegateAgent(agent, task, ctx);
+
+        const truncated =
+          result.output.length > 8000
+            ? result.output.slice(0, 8000) + "\n\n... [truncated]"
+            : result.output;
+
+        const status = result.exitCode === 0 ? "done" : "error";
+        const summary = `[${agent}] ${status} in ${Math.round(result.elapsed / 1000)}s`;
+
+        return {
+          content: [{ type: "text", text: `${summary}\n\n${truncated}` }],
+          details: {
+            agentName: agent,
+            task,
+            status,
+            elapsed: result.elapsed,
+            exitCode: result.exitCode,
+            fullOutput: result.output,
+          } as DelegationResult,
+        };
+      },
+
+      renderCall(args, theme) {
+        const agentName = (args as any).agent || "?";
+        const task = (args as any).task || "";
+        const preview = task.length > 60 ? task.slice(0, 57) + "..." : task;
+        return new Text(
+          theme.fg("toolTitle", theme.bold("agent_delegate ")) +
+            theme.fg("accent", agentName) +
+            theme.fg("dim", " — ") +
+            theme.fg("muted", preview),
+          0,
+          0,
+        );
+      },
+
+      renderResult(result, options, theme) {
+        const details = result.details as DelegationResult | undefined;
+        if (!details || details.reason === "delegation_not_allowed") {
+          const text = result.content[0];
+          return new Text(text?.type === "text" ? text.text : "", 0, 0);
+        }
+
+        if (options.isPartial || details.status === "delegating") {
+          return new Text(
+            theme.fg("accent", `→ ${details.agentName || "?"}`) +
+              theme.fg("dim", " delegating..."),
+            0,
+            0,
+          );
+        }
+
+        const icon = details.status === "done" ? "✓" : "✗";
+        const color = details.status === "done" ? "success" : "error";
+        const elapsed =
+          typeof details.elapsed === "number"
+            ? Math.round(details.elapsed / 1000)
+            : 0;
+        const header =
+          theme.fg(color, `${icon} ${details.agentName}`) +
+          theme.fg("dim", ` ${elapsed}s`);
+
+        if (options.expanded && details.fullOutput) {
+          const output =
+            details.fullOutput.length > 4000
+              ? details.fullOutput.slice(0, 4000) + "\n... [truncated]"
+              : details.fullOutput;
+          return new Text(header + "\n" + theme.fg("muted", output), 0, 0);
+        }
+
+        return new Text(header, 0, 0);
       },
     });
   }
