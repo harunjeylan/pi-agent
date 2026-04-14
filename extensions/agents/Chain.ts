@@ -931,9 +931,12 @@ ${agentCatalog}
               stepLines.push(
                 stepHeader +
                   "\n" +
-                  theme.fg("text", `Task: ${taskPreview}`) +
+                  theme.fg("accent", "Task: ") +
+                  theme.fg("text", taskPreview) +
+                  "\n\n" +
+                  theme.fg("accent", "Result:") +
                   "\n" +
-                  theme.fg("text", `Result: ${output}`) +
+                  theme.fg("muted", output) +
                   "\n",
               );
             }
