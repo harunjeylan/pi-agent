@@ -21,34 +21,46 @@ export class SwarmManager {
     if (!this.widgetCtx) return;
     for (const [id, state] of this.agent.getSwarmAgents()) {
       this.widgetCtx.ui.setWidget(`swarm-${id}`, (_tui: any, theme: any) => {
-        const statusColor = state.status === "running" ? "accent"
-          : state.status === "done" ? "success" : "error";
-        const statusIcon = state.status === "running" ? "●"
-          : state.status === "done" ? "✓" : "✗";
+        const statusColor =
+          state.status === "running"
+            ? "accent"
+            : state.status === "done"
+              ? "success"
+              : "error";
+        const statusIcon =
+          state.status === "running"
+            ? "●"
+            : state.status === "done"
+              ? "✓"
+              : "✗";
 
-        const taskPreview = state.task.length > 40
-          ? state.task.slice(0, 37) + "..."
-          : state.task;
+        const taskPreview =
+          state.task.length > 40 ? state.task.slice(0, 37) + "..." : state.task;
 
-        const turnLabel = state.turnCount > 1
-          ? ` · Turn ${state.turnCount}`
-          : "";
+        const turnLabel =
+          state.turnCount > 1 ? ` · Turn ${state.turnCount}` : "";
 
-        const ctxStr = state.contextPct > 0 ? ` 📊${Math.round(state.contextPct)}%` : "";
+        const ctxStr =
+          state.contextPct > 0 ? ` 📊${Math.round(state.contextPct)}%` : "";
 
         const lines = [
           `${statusIcon} Swarm #${state.id}${turnLabel}  ${taskPreview}  (${Math.round(state.elapsed / 1000)}s) 🛠${state.toolCount}${ctxStr}`,
         ];
 
-        const lastLine = state.output.split("\n").filter((l: string) => l.trim()).pop() || "";
+        const lastLine =
+          state.output
+            .split("\n")
+            .filter((l: string) => l.trim())
+            .pop() || "";
         if (lastLine) {
-          const trimmed = lastLine.length > 80 ? lastLine.slice(0, 77) + "..." : lastLine;
+          const trimmed =
+            lastLine.length > 80 ? lastLine.slice(0, 77) + "..." : lastLine;
           lines.push(trimmed);
         }
 
         return {
           render(width: number): string[] {
-            return lines.map(l => l.slice(0, width));
+            return lines.map((l) => l.slice(0, width));
           },
           invalidate() {},
         };
@@ -78,11 +90,14 @@ export class SwarmManager {
         if (!args?.trim()) {
           const swarmAgents = this.agent.getSwarmAgents();
           if (swarmAgents.size === 0) {
-            ctx.ui.notify("No active swarm agents. Use /swarm <task> to spawn one.", "info");
+            ctx.ui.notify(
+              "No active swarm agents. Use /swarm <task> to spawn one.",
+              "info",
+            );
             return;
           }
           const list = Array.from(swarmAgents.values())
-            .map(a => `[${a.id}] ${a.status}: ${a.task.slice(0, 50)}`)
+            .map((a) => `[${a.id}] ${a.status}: ${a.task.slice(0, 50)}`)
             .join("\n");
           ctx.ui.notify(`Swarm agents:\n${list}`, "info");
           return;
@@ -92,7 +107,10 @@ export class SwarmManager {
         const swarmAgent = this.agent.createSwarmAgent(task);
         this.runSwarmAgent(swarmAgent.id, task, ctx);
         this.agent.setMode("swarm");
-        ctx.ui.notify(`Spawned swarm agent ${swarmAgent.id}: ${task.slice(0, 40)}...`, "info");
+        ctx.ui.notify(
+          `Spawned swarm agent ${swarmAgent.id}: ${task.slice(0, 40)}...`,
+          "info",
+        );
       },
     });
 
@@ -105,7 +123,10 @@ export class SwarmManager {
           return;
         }
         const list = Array.from(swarmAgents.values())
-          .map(a => `[${a.id}] ${a.status}: ${a.task.slice(0, 40)} (${Math.round(a.elapsed / 1000)}s)`)
+          .map(
+            (a) =>
+              `[${a.id}] ${a.status}: ${a.task.slice(0, 40)} (${Math.round(a.elapsed / 1000)}s)`,
+          )
           .join("\n");
         ctx.ui.notify(`Swarm agents:\n${list}`, "info");
       },
@@ -161,7 +182,12 @@ export class SwarmManager {
         this.widgetCtx = ctx;
         const swarmAgent = this.agent.createSwarmAgent(params.task);
         this.runSwarmAgent(swarmAgent.id, params.task, ctx);
-        return { content: [{ type: "text", text: `Spawned swarm agent ${swarmAgent.id}` }], details: undefined };
+        return {
+          content: [
+            { type: "text", text: `Spawned swarm agent ${swarmAgent.id}` },
+          ],
+          details: undefined,
+        };
       },
     });
 
@@ -176,13 +202,31 @@ export class SwarmManager {
       execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
         const swarmAgent = this.agent.getSwarmAgent(params.id);
         if (!swarmAgent) {
-          return { content: [{ type: "text", text: `Swarm agent ${params.id} not found` }], details: undefined };
+          return {
+            content: [
+              { type: "text", text: `Swarm agent ${params.id} not found` },
+            ],
+            details: undefined,
+          };
         }
         if (swarmAgent.status === "running") {
-          return { content: [{ type: "text", text: `Swarm agent ${params.id} is still running` }], details: undefined };
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Swarm agent ${params.id} is still running`,
+              },
+            ],
+            details: undefined,
+          };
         }
         this.runSwarmAgent(params.id, params.prompt, ctx, true);
-        return { content: [{ type: "text", text: `Continued swarm agent ${params.id}` }], details: undefined };
+        return {
+          content: [
+            { type: "text", text: `Continued swarm agent ${params.id}` },
+          ],
+          details: undefined,
+        };
       },
     });
 
@@ -196,7 +240,12 @@ export class SwarmManager {
       execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
         const swarmAgent = this.agent.getSwarmAgent(params.id);
         if (!swarmAgent) {
-          return { content: [{ type: "text", text: `Swarm agent ${params.id} not found` }], details: undefined };
+          return {
+            content: [
+              { type: "text", text: `Swarm agent ${params.id} not found` },
+            ],
+            details: undefined,
+          };
         }
         swarmAgent._removed = true;
         if (swarmAgent.proc && swarmAgent.status === "running") {
@@ -204,7 +253,10 @@ export class SwarmManager {
         }
         this.agent.removeSwarmAgent(params.id);
         ctx.ui.setWidget(`swarm-${params.id}`, undefined);
-        return { content: [{ type: "text", text: `Removed swarm agent ${params.id}` }], details: undefined };
+        return {
+          content: [{ type: "text", text: `Removed swarm agent ${params.id}` }],
+          details: undefined,
+        };
       },
     });
 
@@ -216,12 +268,18 @@ export class SwarmManager {
       execute: async (_toolCallId, _params, _signal, _onUpdate, _ctx) => {
         const swarmAgents = this.agent.getSwarmAgents();
         if (swarmAgents.size === 0) {
-          return { content: [{ type: "text", text: "No active swarm agents" }], details: undefined };
+          return {
+            content: [{ type: "text", text: "No active swarm agents" }],
+            details: undefined,
+          };
         }
         const list = Array.from(swarmAgents.values())
-          .map(a => `[${a.id}] ${a.status}: ${a.task.slice(0, 40)}`)
+          .map((a) => `[${a.id}] ${a.status}: ${a.task.slice(0, 40)}`)
           .join("\n");
-        return { content: [{ type: "text", text: `Swarm agents:\n${list}` }], details: undefined };
+        return {
+          content: [{ type: "text", text: `Swarm agents:\n${list}` }],
+          details: undefined,
+        };
       },
     });
   }
@@ -245,7 +303,12 @@ export class SwarmManager {
     } catch {}
   }
 
-  private runSwarmAgent(id: number, task: string, ctx: any, continueSession = false): void {
+  private runSwarmAgent(
+    id: number,
+    task: string,
+    ctx: any,
+    continueSession = false,
+  ): void {
     const swarmAgent = this.agent.getSwarmAgent(id);
     if (!swarmAgent) return;
 
@@ -268,12 +331,16 @@ export class SwarmManager {
     const hasSession = existsSync(sessionFile);
 
     const args = [
-      "--mode", "json",
+      "--mode",
+      "json",
       "-p",
       "--no-extensions",
-      "--model", model,
-      "--tools", tools,
-      "--session", sessionFile,
+      "--model",
+      model,
+      "--tools",
+      tools,
+      "--session",
+      sessionFile,
     ];
 
     if (hasSession || continueSession) {
@@ -315,7 +382,7 @@ export class SwarmManager {
       }
     });
 
-    const timeout = 300000;
+    const timeout = 1000000;
     const timeoutTimer = setTimeout(() => {
       proc.kill("SIGTERM");
       this.agent.updateSwarmAgent(id, {
@@ -346,18 +413,24 @@ export class SwarmManager {
       this.updateWidgets();
 
       const result = swarmAgent.output;
-      const truncated = result.length > 8000 ? result.slice(0, 8000) + "\n\n... [truncated]" : result;
+      const truncated =
+        result.length > 8000
+          ? result.slice(0, 8000) + "\n\n... [truncated]"
+          : result;
 
       ctx.ui.notify(
         `Swarm #${id} ${finalStatus} in ${Math.round(elapsed / 1000)}s`,
-        finalStatus === "done" ? "success" : "error"
+        finalStatus === "done" ? "success" : "error",
       );
 
-      this.pi.sendMessage({
-        customType: "swarm-result",
-        content: `Swarm #${id}${swarmAgent.turnCount > 1 ? ` (Turn ${swarmAgent.turnCount})` : ""} finished "${task}" in ${Math.round(elapsed / 1000)}s.\n\nResult:\n${truncated}`,
-        display: true,
-      }, { deliverAs: "followUp", triggerTurn: true });
+      this.pi.sendMessage(
+        {
+          customType: "swarm-result",
+          content: `Swarm #${id}${swarmAgent.turnCount > 1 ? ` (Turn ${swarmAgent.turnCount})` : ""} finished "${task}" in ${Math.round(elapsed / 1000)}s.\n\nResult:\n${truncated}`,
+          display: true,
+        },
+        { deliverAs: "followUp", triggerTurn: true },
+      );
     });
 
     proc.on("error", (err) => {

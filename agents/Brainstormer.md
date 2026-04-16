@@ -50,6 +50,24 @@ Wait for answer, then ask Q2 based on their response.
 
 Continue asking one question at a time, adapting based on each answer.
 
+### Step 0: Analyze Existing Project (If Applicable)
+
+If brainstorming improvements to an existing codebase:
+
+```
+graphify_build:
+  path: "./project"
+  mode: "deep"
+
+graphify_analyze:
+  type: "gaps"
+
+graphify_analyze:
+  type: "surprises"
+```
+
+Use findings to guide brainstorming.
+
 ### Step 2: Capture Ideas
 
 1. Document all ideas as they come

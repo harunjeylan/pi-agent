@@ -1,6 +1,5 @@
 node_modules/
 /**/*/node_modules/
-package-lock.json
 sandbox/
 /**/*/.venv/
 sessions/
@@ -8,3 +7,9 @@ bin/
 .env
 auth.json
 web-search.json
+pi-crash.log
+mcp-npx-cache.json
+mcp-cache.json
+run-history.jsonl
+.extmgr-cache
+schedule-prompts.json

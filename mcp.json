@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "chrome-devtools": {
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@latest"],
+      "directTools": true
+    },
+    "docker-mcp": {
+      "command": "docker",
+      "args": ["mcp", "gateway", "run"],
+      "directTools": true
+    },
+    "graphify": {
+      "type": "stdio",
+      "command": "python3",
+      "args": ["-m", "graphify.serve", "graphify-out/graph.json"]
+    }
+  }
+}

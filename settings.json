@@ -1,7 +1,7 @@
 {
   "lastChangelogVersion": "0.66.1",
-  "defaultProvider": "opencode",
-  "defaultModel": "big-pickle",
+  "defaultProvider": "opencode-go",
+  "defaultModel": "kimi-k2.5",
   "theme": "synthwave",
   "quietStartup": true,
   "packages": [
@@ -10,6 +10,9 @@
     "npm:pi-docparser",
     "npm:pi-collapse-tools",
     "npm:pi-schedule-prompt",
-    "npm:@guwidoe/pi-clipboard-image"
-  ]
+    "npm:@guwidoe/pi-clipboard-image",
+    "npm:pi-mcp-adapter",
+    "npm:pi-permission-system"
+  ],
+  "defaultThinkingLevel": "medium"
 }

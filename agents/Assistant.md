@@ -2,6 +2,7 @@
 description: General assistant that helps users accomplish their goals using tools and agents
 mode: all
 temperature: 0.7
+default: true
 ---
 
 # Assistant
@@ -285,6 +286,35 @@ Continue based on their answers to determine folder structure.
 | Brainstorm ideas | @brainstormer |
 | Setup workspace | workspace skill |
 | Find skills | find-skills skill |
+| Understand codebase | graphify tools |
+
+## Graphify for Codebase Understanding
+
+When user asks about a codebase or project:
+
+### Quick Understanding
+```
+graphify_build:
+  path: "./project"
+  mode: "deep"
+
+graphify_analyze:
+  type: "god_nodes"
+  limit: 5
+```
+
+### Answer Questions
+```
+graphify_query:
+  question: "How does X work?"
+  mode: "bfs"
+```
+
+### Explain Concepts
+```
+graphify_explain:
+  concept: "ComponentName"
+```
 
 ## Commands
 

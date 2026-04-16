@@ -90,18 +90,27 @@ ${agentList}`,
   }
 
   private registerShortcut(): void {
-    this.pi.registerShortcut("Alt+a", {
+    this.pi.registerShortcut("alt+a", {
       description: "Switch to next system agent (cyclic)",
       handler: async (ctx) => {
-        const profiles = this.agent.getProfiles().filter(p => p && typeof p.name === "string");
+        const profiles = this.agent
+          .getProfiles()
+          .filter((p) => p && typeof p.name === "string");
         if (profiles.length === 0) {
           ctx.ui.notify("No system profiles available", "warning");
           return;
         }
+        const sortedProfiles = [...profiles].sort((a, b) => {
+          if (a.default && !b.default) return -1;
+          if (!a.default && b.default) return 1;
+          return 0;
+        });
         const current = this.agent.getSystemAgent()?.name;
-        const currentIndex = profiles.findIndex(p => p.name === current);
-        const nextIndex = (currentIndex + 1) % profiles.length;
-        const nextProfile = profiles[nextIndex];
+        const currentIndex = sortedProfiles.findIndex(
+          (p) => p.name === current,
+        );
+        const nextIndex = (currentIndex + 1) % sortedProfiles.length;
+        const nextProfile = sortedProfiles[nextIndex];
         this.agent.setSystemAgent(nextProfile.name);
         ctx.ui.notify(`System: ${nextProfile.name}`, "info");
       },

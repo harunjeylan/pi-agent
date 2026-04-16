@@ -12,6 +12,7 @@ export interface AgentProfile {
   description: string;
   model?: string;
   tools?: string[];
+  default?: boolean;
   body: string;
 }
 
@@ -156,6 +157,10 @@ export class Agent {
           }
         }
       }
+      const defaultProfile = Array.from(this.profiles.values()).find(p => p.default);
+      if (defaultProfile) {
+        this.systemAgent = defaultProfile;
+      }
     } catch (err) {
       console.warn("[Agent] Failed to load user profiles:", err);
     }
@@ -197,6 +202,7 @@ export class Agent {
       tools: frontmatter.tools
         ? frontmatter.tools.split(",").map((t) => t.trim())
         : undefined,
+      default: frontmatter.default === "true",
       body: body || `You are a ${name} agent.`,
     };
   }
